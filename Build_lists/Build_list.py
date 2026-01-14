@@ -14,17 +14,18 @@ class Build():
 
     def __build__(self,batch_list = None, index_list = None):
         # assert batch_list and index list are not both None or both not None
-        assert (batch_list is None) != (index_list is None), "Either batch_list or index_list must be provided, but not both."
 
-        if index_list is None:
+        if index_list is None and batch_list is not None:
             for b in range(len(batch_list)):
                 cases = self.data.loc[self.data['batch'] == batch_list[b]]
                 if b == 0:
                     c = cases.copy()
                 else:
                     c = pd.concat([c,cases])
-        else: # index is just the index of row
+        elif batch_list is None and index_list is not None:
             c = self.data.loc[index_list]
+        elif batch_list is None and index_list is None:
+            c = self.data
 
         batch_list = np.asarray(c['batch']) if 'batch' in c.columns else None
         patient_index_list = np.asarray(c['Patient_index']) if 'Patient_index' in c.columns else None
