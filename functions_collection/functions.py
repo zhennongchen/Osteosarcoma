@@ -101,28 +101,6 @@ def save_grayscale_image(a,save_path,normalize = True, WL = 50, WW = 100):
     
     Image.fromarray((I*255).astype('uint8')).save(save_path)
 
-# function: plot ROC curve and get AUC
-from sklearn.metrics import roc_curve, auc
-from sklearn.metrics import roc_auc_score
-
-def plot_roc_curve(y_true, y_prob, figsize=(6,6)):
-    
-    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-    auc = roc_auc_score(y_true, y_prob)
-
-    plt.figure(figsize=figsize)
-    plt.plot(fpr, tpr, lw=2, label=f'ROC (AUC = {auc:.3f})')
-    plt.plot([0,1], [0,1], '--', lw=1)   # random guess line
-    plt.xlim([0,1])
-    plt.ylim([0,1.05])
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title("Out-of-fold ROC curve (5-fold CV)")
-    plt.legend(loc="lower right")
-    plt.grid(alpha=0.3)
-
-    plt.tight_layout()
-    plt.show()
 
 # function: calculate ICC(2,1)
 def icc2_1(x, y):
