@@ -4,6 +4,7 @@ import os
 from skimage.measure import block_reduce
 from scipy import ndimage
 from dipy.align.reslice import reslice
+import pandas as pd
 import Osteosarcoma.functions_collection as ff
 
 def crop_or_pad(array, target, value):
@@ -179,6 +180,170 @@ def resample_nifti(nifti,
 
     return nifti_resampled       
     
-    
-    
-    
+# function: get 3D bbox from label
+def bbox3d(label_arr, buffer_x=5, buffer_y=5, buffer_z=5):
+    tumor = (label_arr == 1)
+
+    if not np.any(tumor):
+        raise ValueError(f"No tumor voxels found in label: {label_path}")
+
+    # ---------- 2) find tight bbox ----------
+    xx, yy, zz = np.where(tumor)
+
+    x_min, x_max = xx.min(), xx.max()
+    y_min, y_max = yy.min(), yy.max()
+    z_min, z_max = zz.min(), zz.max()
+
+    # ---------- 3) apply buffer and clip ----------
+    X, Y, Z = label_arr.shape
+
+    x0 = max(x_min - buffer_x, 0)
+    x1 = min(x_max + buffer_x, X - 1)
+
+    y0 = max(y_min - buffer_y, 0)
+    y1 = min(y_max + buffer_y, Y - 1)
+
+    z0 = max(z_min - buffer_z, 0)
+    z1 = min(z_max + buffer_z, Z - 1)
+
+    print("Tight bbox (x,y,z):",
+        (x_min, x_max), (y_min, y_max), (z_min, z_max))
+    print("Buffered bbox:",
+        f"x[{x0}:{x1}], y[{y0}:{y1}], z[{z0}:{z1}]")
+
+    # ---------- 4) build bbox mask ----------
+    bbox_arr = np.zeros_like(label_arr, dtype=np.uint8)
+    bbox_arr[x0:x1+1, y0:y1+1, z0:z1+1] = 1
+
+    return bbox_arr, x0, x1, y0, y1, z0, z1
+
+
+
+def patchify(label_arr, label_nii, x0, x1, y0, y1, z0, z1, patch_size_mm, min_tumor_fraction, out_dir, patch_table_path):
+    tumor = (label_arr == 1)
+
+    # spacing from header (in mm)
+    # nibabel: header['pixdim'] = [?, dx, dy, dz, ...]
+    pixdim = label_nii.header.get_zooms()[:3]  # (dx,dy,dz)
+    dx, dy, dz = float(pixdim[0]), float(pixdim[1]), float(pixdim[2])
+
+    print("Spacing (mm):", dx, dy, dz)
+
+    # ---------------- compute patch size in voxels ----------------
+    nx = int(np.ceil(patch_size_mm / dx))
+    ny = int(np.ceil(patch_size_mm / dy))
+    nz = int(np.ceil(patch_size_mm / dz))
+
+    # 强制至少 1 voxel
+    nx = max(nx, 1)
+    ny = max(ny, 1)
+    nz = max(nz, 1)
+
+    print("Patch size (vox):", nx, ny, nz)
+
+    X, Y, Z = label_arr.shape
+
+    # ---------------- determine grid ranges (allow extend beyond bbox if not divisible) ----------------
+    bbox_len_x = (x1 - x0 + 1)
+    bbox_len_y = (y1 - y0 + 1)
+    bbox_len_z = (z1 - z0 + 1)
+
+    npx = int(np.ceil(bbox_len_x / nx))
+    npy = int(np.ceil(bbox_len_y / ny))
+    npz = int(np.ceil(bbox_len_z / nz))
+
+    # grid_end may extend outside bbox; later clip to image boundary
+    grid_x_end = x0 + npx * nx - 1
+    grid_y_end = y0 + npy * ny - 1
+    grid_z_end = z0 + npz * nz - 1
+
+    # clip to image bounds
+    grid_x_end = min(grid_x_end, X - 1)
+    grid_y_end = min(grid_y_end, Y - 1)
+    grid_z_end = min(grid_z_end, Z - 1)
+
+    print("Grid start:", (x0, y0, z0))
+    print("Grid end  :", (grid_x_end, grid_y_end, grid_z_end))
+    print("Grid n patches:", (npx, npy, npz))
+
+    total_patches = npx * npy * npz
+
+    # ---------------- iterate patches ----------------
+    rows = []
+    patch_id = 0
+
+    count_included = 0
+    for iz in range(npz):
+        for iy in range(npy):
+            for ix in range(npx):
+                # patch bounds in voxel index (inclusive)
+                px0 = x0 + ix * nx
+                py0 = y0 + iy * ny
+                pz0 = z0 + iz * nz
+
+                px1 = px0 + nx - 1
+                py1 = py0 + ny - 1
+                pz1 = pz0 + nz - 1
+
+                # clip to image bounds (important when extended)
+                px0_c = max(px0, 0); py0_c = max(py0, 0); pz0_c = max(pz0, 0)
+                px1_c = min(px1, X-1); py1_c = min(py1, Y-1); pz1_c = min(pz1, Z-1)
+
+                # if patch completely outside image (rare), skip
+                if (px0_c > px1_c) or (py0_c > py1_c) or (pz0_c > pz1_c):
+                    continue
+
+                # tumor fraction inside THIS patch (using tumor voxels only)
+                patch_tumor = tumor[px0_c:px1_c+1, py0_c:py1_c+1, pz0_c:pz1_c+1]
+                patch_voxels = patch_tumor.size
+                tumor_voxels = int(patch_tumor.sum())
+                tumor_fraction = tumor_voxels / float(patch_voxels)
+
+                if tumor_fraction < min_tumor_fraction:
+                    continue
+                count_included += 1
+
+                # ---------------- build and save patch mask: (patch region) AND (tumor) ----------------
+                patch_mask = np.zeros_like(tumor, dtype=np.uint8)
+                patch_mask[px0_c:px1_c+1, py0_c:py1_c+1, pz0_c:pz1_c+1] = patch_tumor.astype(np.uint8)
+
+                patch_mask_nii = nb.Nifti1Image(patch_mask, affine=label_nii.affine, header=label_nii.header)
+                patch_mask_path = os.path.join(out_dir, f"patch_{patch_id:04d}.nii.gz")
+                nb.save(patch_mask_nii, patch_mask_path)
+
+                # ---------------- record 8 vertices (voxel coords) ----------------
+                # 顶点定义（按 voxel index，inclusive）：
+                # z0 面： (x0,y0,z0) (x1,y0,z0) (x1,y1,z0) (x0,y1,z0)
+                # z1 面： (x0,y0,z1) (x1,y0,z1) (x1,y1,z1) (x0,y1,z1)
+                v = [
+                    (px0_c, py0_c, pz0_c),
+                    (px1_c, py0_c, pz0_c),
+                    (px1_c, py1_c, pz0_c),
+                    (px0_c, py1_c, pz0_c),
+                    (px0_c, py0_c, pz1_c),
+                    (px1_c, py0_c, pz1_c),
+                    (px1_c, py1_c, pz1_c),
+                    (px0_c, py1_c, pz1_c),
+                ]
+
+                row = {
+                    "patch_id": patch_id,
+                    "tumor_fraction": tumor_fraction,
+                    "mask_path": patch_mask_path,  # 可选：方便后续 radiomics batch
+                }
+                for i, (vx, vy, vz) in enumerate(v, start=1):
+                    row[f"x_{i}"] = int(vx)
+                    row[f"y_{i}"] = int(vy)
+                    row[f"z_{i}"] = int(vz)
+
+                rows.append(row)
+                patch_id += 1
+
+    # print("Kept patches:", patch_id)
+
+    # ---------------- save table ----------------
+    df_patches = pd.DataFrame(rows)
+    df_patches.to_excel(patch_table_path, index=False)
+    # print("Saved patch table:", patch_table_path)
+
+    return count_included, total_patches

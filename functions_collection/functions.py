@@ -10,21 +10,6 @@ import nibabel as nb
 import matplotlib.pyplot as plt
 from skimage.metrics import structural_similarity as compare_ssim
 
-
-# function: set window level
-def set_window(image,level,width):
-    if len(image.shape) == 3:
-        image = image.reshape(image.shape[0],image.shape[1])
-    new = np.copy(image)
-    high = level + width // 2
-    low = level - width // 2
-    # normalize
-    unit = (1-0) / (width)
-    new[new>high] = high
-    new[new<low] = low
-    new = (new - low) * unit 
-    return new
-
 # function: get first X numbers
 # if we have 1000 numbers, how to get the X number of every interval numbers?
 def get_X_numbers_in_interval(total_number, start_number, end_number , interval = 100):
@@ -144,4 +129,5 @@ def icc2_1(x, y):
         return np.nan
     icc = (MSR - MSE) / denom
     return icc
+
 
