@@ -185,7 +185,7 @@ def bbox3d(label_arr, buffer_x=5, buffer_y=5, buffer_z=5):
     tumor = (label_arr == 1)
 
     if not np.any(tumor):
-        raise ValueError(f"No tumor voxels found in label: {label_path}")
+        raise ValueError("no tumor voxels found in label")
 
     # ---------- 2) find tight bbox ----------
     xx, yy, zz = np.where(tumor)
@@ -206,17 +206,16 @@ def bbox3d(label_arr, buffer_x=5, buffer_y=5, buffer_z=5):
     z0 = max(z_min - buffer_z, 0)
     z1 = min(z_max + buffer_z, Z - 1)
 
-    print("Tight bbox (x,y,z):",
-        (x_min, x_max), (y_min, y_max), (z_min, z_max))
-    print("Buffered bbox:",
-        f"x[{x0}:{x1}], y[{y0}:{y1}], z[{z0}:{z1}]")
+    # print("Tight bbox (x,y,z):",
+    #     (x_min, x_max), (y_min, y_max), (z_min, z_max))
+    # print("Buffered bbox:",
+    #     f"x[{x0}:{x1}], y[{y0}:{y1}], z[{z0}:{z1}]")
 
     # ---------- 4) build bbox mask ----------
     bbox_arr = np.zeros_like(label_arr, dtype=np.uint8)
     bbox_arr[x0:x1+1, y0:y1+1, z0:z1+1] = 1
 
     return bbox_arr, x0, x1, y0, y1, z0, z1
-
 
 
 def patchify(label_arr, label_nii, x0, x1, y0, y1, z0, z1, patch_size_mm, min_tumor_fraction, out_dir, patch_table_path):
@@ -227,7 +226,7 @@ def patchify(label_arr, label_nii, x0, x1, y0, y1, z0, z1, patch_size_mm, min_tu
     pixdim = label_nii.header.get_zooms()[:3]  # (dx,dy,dz)
     dx, dy, dz = float(pixdim[0]), float(pixdim[1]), float(pixdim[2])
 
-    print("Spacing (mm):", dx, dy, dz)
+    # print("Spacing (mm):", dx, dy, dz)
 
     # ---------------- compute patch size in voxels ----------------
     nx = int(np.ceil(patch_size_mm / dx))
@@ -239,7 +238,7 @@ def patchify(label_arr, label_nii, x0, x1, y0, y1, z0, z1, patch_size_mm, min_tu
     ny = max(ny, 1)
     nz = max(nz, 1)
 
-    print("Patch size (vox):", nx, ny, nz)
+    # print("Patch size (vox):", nx, ny, nz)
 
     X, Y, Z = label_arr.shape
 
@@ -262,9 +261,9 @@ def patchify(label_arr, label_nii, x0, x1, y0, y1, z0, z1, patch_size_mm, min_tu
     grid_y_end = min(grid_y_end, Y - 1)
     grid_z_end = min(grid_z_end, Z - 1)
 
-    print("Grid start:", (x0, y0, z0))
-    print("Grid end  :", (grid_x_end, grid_y_end, grid_z_end))
-    print("Grid n patches:", (npx, npy, npz))
+    # print("Grid start:", (x0, y0, z0))
+    # print("Grid end  :", (grid_x_end, grid_y_end, grid_z_end))
+    # print("Grid n patches:", (npx, npy, npz))
 
     total_patches = npx * npy * npz
 
