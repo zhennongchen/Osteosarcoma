@@ -9,6 +9,9 @@ import random
 import nibabel as nb
 import matplotlib.pyplot as plt
 from skimage.metrics import structural_similarity as compare_ssim
+from tkinter import font
+from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_auc_score
 
 # function: get first X numbers
 # if we have 1000 numbers, how to get the X number of every interval numbers?
@@ -130,4 +133,25 @@ def icc2_1(x, y):
     icc = (MSR - MSE) / denom
     return icc
 
+# function: plot ROC curve
+def plot_roc_curve(y_true, y_prob, figsize=(6,6), title = "ROC curve", save_true = False, save_path = None):
 
+    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+    auc = roc_auc_score(y_true, y_prob)
+
+    plt.figure(figsize=figsize)
+    plt.plot(fpr, tpr, lw=2, label=f'ROC (AUC = {auc:.3f})')
+    plt.plot([0,1], [0,1], '--', lw=1)   # random guess line
+    plt.xlim([0,1])
+    plt.ylim([0,1.05])
+    plt.xlabel("False Positive Rate", fontsize = 13)
+    plt.ylabel("True Positive Rate" , fontsize = 13)
+    plt.title(title , fontsize = 14)
+    plt.legend(loc="lower right")
+    plt.grid(alpha=0.3)
+
+    plt.tight_layout()
+    if not save_true:
+        plt.show()
+    if save_true and save_path is not None:
+        plt.savefig(save_path)
