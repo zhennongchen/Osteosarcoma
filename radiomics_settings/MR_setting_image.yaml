@@ -10,8 +10,7 @@
 imageType:
   Original: {}
   LoG:
-    # Because of resampling to (3, 3, 3), the use of sigmas < 3 mm is not recommended.
-    sigma: [2.0, 4.0, 6.0]  # in mm
+    sigma: [2.0, 4.0]  # in mm
   Wavelet: {}
 
 featureClass:
@@ -73,7 +72,7 @@ setting:
   # The ideal number of bins is somewhere in the order of 16-128 bins. A possible way to define a good binwidt is to
   # extract firstorder:Range from the dataset to analyze, and choose a binwidth so, that range/binwidth remains approximately
   # in this range of bins.
-  binWidth: 10 # use binwidth = 10
+  binWidth: 25 # use binwidth = 10
 
   # first order specific settings:
   # When normalizing, gray values below the mean will be negative. Shifting by 300 (3 StdDevs * 100) ensures that the

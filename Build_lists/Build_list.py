@@ -28,10 +28,11 @@ class Build():
             c = self.data
 
         batch_list = np.asarray(c['batch']) if 'batch' in c.columns else None
+        patient_set_list = np.asarray(c['Patient_set']) if 'Patient_set' in c.columns else None
         patient_index_list = np.asarray(c['Patient_index']) if 'Patient_index' in c.columns else None
-        label_list = np.asarray(c['Pathologic_Response_Necrosis_gt90pct']) if 'Pathologic_Response_Necrosis_gt90pct' in c.columns else None
+        label_list = np.asarray(c['Prognosis_label']) if 'Prognosis_label' in c.columns else None
         image_path_list = np.asarray(c['Image_filepath']) if 'Image_filepath' in c.columns else None
         mask_path_list = np.asarray(c['Mask_filepath']) if 'Mask_filepath' in c.columns else None
 
-        return batch_list, patient_index_list, label_list, image_path_list, mask_path_list
+        return batch_list, patient_set_list, patient_index_list, label_list, image_path_list, mask_path_list
       
