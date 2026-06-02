@@ -27,11 +27,21 @@ Owner: User + Copilot
 ### A. Whole-image radiomics model
 - Step A1: Extract whole-tumor radiomics features.
 - Step A2: Standard feature-selection pipeline (stability + redundancy control + supervised selection).
-- Step A3: Train multiple standard ML/DL classifiers.
+- Locked early feature filtering: ICC reproducibility filtering -> PCC redundancy filtering.
+- Updated A-line feature-selection policy (v1.5): each classifier uses its own classifier-specific feature-selection path rather than a single shared LASSO-selected feature set; use top 20 selected features by default.
+- LR uses LASSO logistic regression for classifier-specific supervised feature selection.
+- SVM uses SVM-RFE top 20 features for feature selection and a linear kernel for modeling unless the user explicitly changes it; SVM-SFS was tested and performed worse.
+- RF uses RF-RFE top 20 features for classifier-specific feature selection.
+- XGBoost uses XGBoost-RFE top 20 features for classifier-specific feature selection.
+- KNN uses KNN-SFS top 20 features because KNN cannot directly use RFE without coef_ or feature_importances_.
+- Step A3: Train and compare five representative ML classifiers: LR, SVM, RF, XGBoost, and KNN, each with its corresponding top 20 selected feature set.
+- Classifier rationale: LR = linear baseline; SVM = linear margin-based radiomics standard; RF = bagging tree ensemble; XGBoost = boosting tree ensemble; KNN = distance/instance-based method with low redundancy against the other four.
+- Global random_state policy: use random_state = 0 unless explicitly changed by the user.
+- LightGBM and ExtraTrees are not in the locked primary five-method panel because LightGBM overlaps with XGBoost and ExtraTrees overlaps with RF; they may be used only as supplementary analyses or after a protocol revision.
 - Step A4: Select the best method by predefined primary metric.
 - A-final definition:
-- A-final features = top K selected features.
-- A-final algorithm = best-performing classifier.
+- A-final features = top 20 selected feature set corresponding to the best-performing classifier.
+- A-final algorithm = best-performing classifier among LR, SVM, RF, XGBoost, and KNN.
 
 ### B. Habitat radiomics model (single-level)
 - Step B1: Tumor patchification (single-level only; no nested-2-stage habitat split).
@@ -72,6 +82,10 @@ Owner: User + Copilot
 - Also track secondary metrics (accuracy, sensitivity, specificity, calibration metrics when available).
 - Report confidence intervals where feasible.
 - Preserve train/validation/test or internal/external boundaries clearly.
+- Current A-line accepted tuning/evaluation strategy (v1.4): choose one fixed hyperparameter set per classifier using the development cohort, run internal 5-fold CV with those fixed hyperparameters, then assess final generalization on an independent testing/external validation cohort.
+- Internal 5-fold CV AUC should be treated as development-cohort reference performance and may be optimistic because hyperparameters come from the same development data.
+- Independent testing/external validation data must not be used for feature selection, scaler fitting, hyperparameter tuning, threshold selection, or model comparison decisions.
+- Final testing procedure: refit the chosen final model on the full development cohort using the fixed hyperparameters, then evaluate once on the independent testing cohort.
 
 ## 7) Reproducibility and outputs
 - Save for each branch:
@@ -83,7 +97,7 @@ Owner: User + Copilot
 - Record random seeds and split files.
 
 ## 8) Immediate next implementation order
-1. Freeze A-final (feature list + best algorithm).
+1. Freeze A-final using classifier-specific feature selection and the five-classifier panel (LR, SVM, RF, XGBoost, KNN).
 2. Freeze B decision on algorithm reuse vs re-search.
 3. Start C baseline (2D and 3D minimal reproducible training).
 4. Define D variable shortlist and baseline model.
@@ -105,3 +119,8 @@ Owner: User + Copilot
 - Note: Any future parameter sweep must be versioned as a new protocol revision before use.
 
 - v1.2: Recorded locked extractor settings after user confirmation (LoG sigma [2.0,4.0], binWidth 25).
+- v1.3: Locked A-line feature selection as ICC -> PCC -> LASSO logistic regression; locked primary classifier panel as LR, SVM, RF, XGBoost, and KNN.
+- v1.4: Recorded accepted A-line tuning/evaluation strategy: fixed hyperparameters from development cohort, internal 5-fold CV as reference performance, and independent testing/external validation as final generalization evidence.
+- v1.5: Updated A-line policy to classifier-specific feature selection; standardized random_state=0; locked SVM to linear kernel unless explicitly changed.
+- v1.6: Locked current A-line classifier-specific selected feature count to top 20 features by default, including SVM-RFE top20 and XGBoost-RFE top20.
+- v1.7: Recorded whole-image radiomics classifier-specific feature-selection outcome: LR=LASSO; SVM/RF/XGBoost=RFE top20; KNN=SFS top20; SVM-SFS tested worse than SVM-RFE.
