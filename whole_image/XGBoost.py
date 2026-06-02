@@ -14,7 +14,7 @@ DEFAULT_RANDOM_STATE = 0
 N_SPLITS = 5
 LABEL_COL = "Prognosis_label"
 NON_FEATURE_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath"]
-RFECV_MAX_FEATURES = 50
+RFECV_MAX_FEATURES = 35
 PATIENT_LIST_PATH = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set12.xlsx"
 )

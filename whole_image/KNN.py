@@ -4,9 +4,10 @@ import os
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -15,7 +16,6 @@ DEFAULT_RANDOM_STATE = 0
 N_SPLITS = 5
 LABEL_COL = "Prognosis_label"
 NON_FEATURE_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath"]
-LASSO_MAX_FEATURES = 35
 PATIENT_LIST_PATH = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set12.xlsx"
 )
@@ -30,60 +30,33 @@ WHOLE_IMAGE_RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image
 WHOLE_IMAGE_MODEL_OUT_DIR = "/host/d/projects/Habitats/models/whole_image"
 
 
-
-class SkipExperiment(Exception):
-    def __init__(self, reason):
-        super().__init__(reason)
-        self.reason = reason
-
-
-def parse_top_k(value):
-    if value is None:
-        return None
-    if isinstance(value, str) and value.lower() == "none":
-        return None
-    try:
-        top_k = int(value)
-    except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError("top_k must be 15, 20, 25, or None") from exc
-    if top_k not in {15, 20, 25}:
-        raise argparse.ArgumentTypeError("top_k must be 15, 20, 25, or None")
-    return top_k
-
-
-def top_k_label(top_k):
-    if top_k is None or (isinstance(top_k, str) and top_k.lower() == "none"):
-        return "none"
-    return f"top{top_k}"
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run whole-image radiomics A-line Logistic Regression experiments."
+        description="Run whole-image radiomics A-line KNN experiments."
     )
     parser.add_argument(
         "--random_state",
         type=int,
         default=DEFAULT_RANDOM_STATE,
-        help="Random seed used for stratified 5-fold patient split.",
+        help="Random seed used for stratified 5-fold patient split and SFS CV.",
     )
     parser.add_argument(
         "--classifier",
-        choices=["LR"],
-        default="LR",
+        choices=["KNN"],
+        default="KNN",
         help="Classifier branch to run.",
     )
     parser.add_argument(
-        "--lr_feature_selector",
-        choices=["lasso"],
-        default="lasso",
-        help="LR-specific supervised feature-selection method.",
+        "--knn_feature_selector",
+        choices=["sfs"],
+        default="sfs",
+        help="KNN-specific supervised feature-selection method.",
     )
     parser.add_argument(
         "--top_k",
-        type=parse_top_k,
+        type=int,
         default=20,
-        help="Number of selected features for LASSO ranking, or None for all non-zero features.",
+        help="Number of selected features for SFS.",
     )
     return parser.parse_args()
 
@@ -172,87 +145,58 @@ def get_feature_cols_from_selected_table(selected_df):
     return [c for c in selected_df.columns if c not in NON_FEATURE_COLS]
 
 
-def get_lr_selected_feature_path(random_state, feature_selector, top_k):
-    suffix = f"random{random_state}_{feature_selector}_{top_k_label(top_k)}"
-    return os.path.join(
-        WHOLE_IMAGE_RADIOMICS_OUT_DIR,
-        f"radiomics_measurements_LR_{suffix}_selected.xlsx",
+def make_knn_pipeline(n_neighbors=5, weights="uniform"):
+    return Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "clf",
+                KNeighborsClassifier(
+                    n_neighbors=n_neighbors,
+                    weights=weights,
+                ),
+            ),
+        ]
     )
 
 
-def select_lasso_features(top_k, feature_cols, X, y, random_state):
+def get_knn_selected_feature_path(random_state, feature_selector, top_k):
+    suffix = f"random{random_state}_{feature_selector}_top{top_k}"
+    return os.path.join(
+        WHOLE_IMAGE_RADIOMICS_OUT_DIR,
+        f"radiomics_measurements_KNN_{suffix}_selected.xlsx",
+    )
+
+
+def select_knn_features(feature_selector, top_k, feature_cols, X, y, random_state):
+    if feature_selector != "sfs":
+        raise ValueError(f"Unsupported KNN feature selector: {feature_selector}")
+
     cv = StratifiedKFold(
         n_splits=N_SPLITS,
         shuffle=True,
         random_state=random_state,
     )
-    model = Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            (
-                "lasso",
-                LogisticRegressionCV(
-                    Cs=30,
-                    cv=cv,
-                    penalty="l1",
-                    solver="liblinear",
-                    scoring="roc_auc",
-                    max_iter=5000,
-                    refit=True,
-                    n_jobs=-1,
-                    random_state=random_state,
-                ),
-            ),
-        ]
+    knn_pipe = make_knn_pipeline()
+    selector = SequentialFeatureSelector(
+        estimator=knn_pipe,
+        n_features_to_select=top_k,
+        direction="forward",
+        scoring="roc_auc",
+        cv=cv,
+        n_jobs=-1,
     )
-    model.fit(X, y)
-    lasso_cv = model.named_steps["lasso"]
+    selector.fit(X, y)
+    support = selector.get_support()
+    selected_features = [f for f, keep in zip(feature_cols, support) if keep]
 
-    coef = lasso_cv.coef_.ravel()
-    abs_coef = np.abs(coef)
-    nonzero_idx = np.where(coef != 0)[0]
-    nonzero_sorted_idx = nonzero_idx[np.argsort(abs_coef[nonzero_idx])[::-1]]
-
-    if top_k is None:
-    
-        selected_idx = nonzero_sorted_idx
-        if len(selected_idx) > LASSO_MAX_FEATURES:
-            raise SkipExperiment(
-                f"LASSO selected {len(selected_idx)} non-zero features, "
-                f"which exceeds the hard limit of {LASSO_MAX_FEATURES}."
-            )
-    elif len(nonzero_sorted_idx) >= top_k:
-        selected_idx = nonzero_sorted_idx[:top_k]
-    else:
-        remaining_idx = [
-            i for i in np.argsort(abs_coef)[::-1] if i not in set(nonzero_sorted_idx)
-        ]
-        selected_idx = np.array(
-            list(nonzero_sorted_idx) + remaining_idx[: top_k - len(nonzero_sorted_idx)]
-        )
-
-    selected_features = [feature_cols[i] for i in selected_idx]
-    selected_coef = coef[selected_idx]
-
-    # print("Best LASSO C:", float(lasso_cv.C_[0]))
-    # print("Best LASSO mean CV AUC:", float(lasso_cv.scores_[1].mean(axis=0).max()))
-    # print("Total features:", len(feature_cols))
-    # print("Selected by LASSO non-zero:", len(nonzero_idx))
-    # print("Selected features:", len(selected_features))
-    # for feature, coefficient in zip(selected_features, selected_coef):
-    #     print(f"  {feature}: coef={coefficient:.6f}")
-
-    metadata = {
-        "lasso_best_C": float(lasso_cv.C_[0]),
-        "lasso_best_mean_cv_auc": float(lasso_cv.scores_[1].mean(axis=0).max()),
-        "lasso_nonzero_feature_count": int(len(nonzero_idx)),
-    }
-    return selected_features, metadata
+    print(f"Selected features by {feature_selector}: {len(selected_features)}")
+    return selector, selected_features
 
 
-def save_selected_lr_features(radiomics_df, selected_features, random_state, feature_selector, top_k):
+def save_selected_knn_features(radiomics_df, selected_features, random_state, feature_selector, top_k):
     os.makedirs(WHOLE_IMAGE_RADIOMICS_OUT_DIR, exist_ok=True)
-    selected_out_path = get_lr_selected_feature_path(
+    selected_out_path = get_knn_selected_feature_path(
         random_state=random_state,
         feature_selector=feature_selector,
         top_k=top_k,
@@ -263,7 +207,7 @@ def save_selected_lr_features(radiomics_df, selected_features, random_state, fea
     return selected_out_path
 
 
-def load_or_select_lr_features(
+def load_or_select_knn_features(
     radiomics_df,
     feature_selector,
     top_k,
@@ -272,7 +216,7 @@ def load_or_select_lr_features(
     y,
     random_state,
 ):
-    selected_path = get_lr_selected_feature_path(
+    selected_path = get_knn_selected_feature_path(
         random_state=random_state,
         feature_selector=feature_selector,
         top_k=top_k,
@@ -284,47 +228,25 @@ def load_or_select_lr_features(
         if selected_features:
             print("Loaded existing selected feature table:", selected_path)
             print(f"Selected features by {feature_selector}: {len(selected_features)}")
-            return selected_path, selected_features, {}
+            return selected_path, selected_features
         print("Existing selected feature table has no feature columns; regenerating:", selected_path)
 
-    if feature_selector != "lasso":
-        raise ValueError(f"Unsupported LR feature selector: {feature_selector}")
-
-    selected_features, metadata = select_lasso_features(
+    _, selected_features = select_knn_features(
+        feature_selector=feature_selector,
         top_k=top_k,
         feature_cols=feature_cols,
         X=X,
         y=y,
         random_state=random_state,
     )
-    selected_path = save_selected_lr_features(
+    selected_path = save_selected_knn_features(
         radiomics_df=radiomics_df,
         selected_features=selected_features,
         random_state=random_state,
         feature_selector=feature_selector,
         top_k=top_k,
     )
-    return selected_path, selected_features, metadata
-
-
-def make_lr_pipeline(random_state, C=1.0, tol=1e-4):
-    return Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            (
-                "clf",
-                LogisticRegression(
-                    penalty="l2",
-                    solver="lbfgs",
-                    C=C,
-                    class_weight="balanced",
-                    tol=tol,
-                    max_iter=5000,
-                    random_state=random_state,
-                ),
-            ),
-        ]
-    )
+    return selected_path, selected_features
 
 
 def best_threshold_metrics(y_true, y_prob):
@@ -369,63 +291,41 @@ def best_threshold_metrics(y_true, y_prob):
     }
 
 
-def get_lr_experiment_name(random_state, feature_selector, top_k):
-    return f"random{random_state}_{feature_selector}_{top_k_label(top_k)}"
+def get_knn_experiment_name(random_state, feature_selector, top_k):
+    return f"random{random_state}_{feature_selector}_top{top_k}"
 
 
-def write_skip_file(out_dir, args, reason):
-    os.makedirs(out_dir, exist_ok=True)
-    skip_info = {
-        "classifier": "LR",
-        "random_state": args.random_state,
-        "feature_selector": args.lr_feature_selector,
-        "top_k": args.top_k,
-        "status": "skipped",
-        "reason": reason,
-    }
-    skip_path = os.path.join(out_dir, "SKIPPED.json")
-    with open(skip_path, "w") as f:
-        json.dump(skip_info, f, indent=4)
-    print("Skipped experiment:", reason)
-    print("Saved skip record:", skip_path)
-
-
-def run_lr_experiment(args, labels_df):
+def run_knn_experiment(args, labels_df):
     radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(
         PCC_RADIOMICS_PATH,
         labels_df,
     )
-    experiment_name = get_lr_experiment_name(
-        random_state=args.random_state,
-        feature_selector=args.lr_feature_selector,
+    selected_path, selected_features = load_or_select_knn_features(
+        radiomics_df=radiomics_df,
+        feature_selector=args.knn_feature_selector,
         top_k=args.top_k,
+        feature_cols=feature_cols,
+        X=X,
+        y=y,
+        random_state=args.random_state,
     )
-    out_dir = os.path.join(WHOLE_IMAGE_MODEL_OUT_DIR, "LR", experiment_name)
-
-    try:
-        selected_path, selected_features, selection_metadata = load_or_select_lr_features(
-            radiomics_df=radiomics_df,
-            feature_selector=args.lr_feature_selector,
-            top_k=args.top_k,
-            feature_cols=feature_cols,
-            X=X,
-            y=y,
-            random_state=args.random_state,
-        )
-    except SkipExperiment as exc:
-        write_skip_file(out_dir, args, exc.reason)
-        return
 
     selected_df = pd.read_excel(selected_path)
     selected_feature_cols = get_feature_cols_from_selected_table(selected_df)
     X_selected = merged_df[selected_feature_cols].values
 
+    experiment_name = get_knn_experiment_name(
+        random_state=args.random_state,
+        feature_selector=args.knn_feature_selector,
+        top_k=args.top_k,
+    )
+    out_dir = os.path.join(WHOLE_IMAGE_MODEL_OUT_DIR, "KNN", experiment_name)
     os.makedirs(out_dir, exist_ok=True)
 
-    lr_pipe = make_lr_pipeline(random_state=args.random_state)
-    param_grid_lr = {
-        "clf__C": [0.001, 0.01, 0.1, 1, 10, 100],
-        "clf__tol": [1e-4, 1e-3],
+    knn_pipe = make_knn_pipeline()
+    param_grid_knn = {
+        "clf__n_neighbors": [3, 7, 9, 11],
+        "clf__weights": ["uniform", "distance"],
     }
     inner_cv = StratifiedKFold(
         n_splits=N_SPLITS,
@@ -434,8 +334,8 @@ def run_lr_experiment(args, labels_df):
     )
 
     grid = GridSearchCV(
-        estimator=lr_pipe,
-        param_grid=param_grid_lr,
+        estimator=knn_pipe,
+        param_grid=param_grid_knn,
         scoring="roc_auc",
         cv=inner_cv,
         n_jobs=-1,
@@ -446,18 +346,17 @@ def run_lr_experiment(args, labels_df):
 
     best_params = grid.best_params_
     best_auc_cv = grid.best_score_
-    print("Best LR params:", best_params)
+    print("Best KNN params:", best_params)
     print(f"Best mean CV AUC during grid search: {best_auc_cv:.4f}")
 
     best_info = {
-        "classifier": "LR",
-        "feature_selector": args.lr_feature_selector,
+        "classifier": "KNN",
+        "feature_selector": args.knn_feature_selector,
         "top_k": args.top_k,
         "random_state": args.random_state,
         "selected_feature_count": len(selected_features),
         "selected_features": selected_features,
         "selected_feature_table": selected_path,
-        **selection_metadata,
         "best_params": best_params,
         "best_gridsearch_auc": float(best_auc_cv),
     }
@@ -479,13 +378,12 @@ def run_lr_experiment(args, labels_df):
         X_train, y_train = X_selected[train_idx], y[train_idx]
         X_val, y_val = X_selected[val_idx], y[val_idx]
 
-        lr_fixed = make_lr_pipeline(
-            random_state=args.random_state,
-            C=best_params["clf__C"],
-            tol=best_params["clf__tol"],
+        knn_fixed = make_knn_pipeline(
+            n_neighbors=best_params["clf__n_neighbors"],
+            weights=best_params["clf__weights"],
         )
-        lr_fixed.fit(X_train, y_train)
-        prob = lr_fixed.predict_proba(X_val)[:, 1]
+        knn_fixed.fit(X_train, y_train)
+        prob = knn_fixed.predict_proba(X_val)[:, 1]
 
         fold_auc = roc_auc_score(y_val, prob)
         fold_aucs.append(fold_auc)
@@ -513,7 +411,7 @@ def run_lr_experiment(args, labels_df):
     threshold_metrics = best_threshold_metrics(y_true, y_prob)
 
     summary = {
-        "model": "Logistic Regression",
+        "model": "KNN",
         **best_info,
         "fold_aucs": [float(x) for x in fold_aucs],
         "mean_fold_auc": float(np.mean(fold_aucs)),
@@ -524,7 +422,7 @@ def run_lr_experiment(args, labels_df):
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=4)
 
-    print("\n========== Logistic Regression Summary ==========")
+    print("\n========== KNN Summary ==========")
     print("Output directory:", out_dir)
     print("Best params:", best_params)
     print(f"Fold AUCs: {[round(x, 4) for x in fold_aucs]}")
@@ -537,8 +435,8 @@ def main():
     args = parse_args()
     labels_df, _ = make_patient_split(random_state=args.random_state)
 
-    if args.classifier == "LR":
-        run_lr_experiment(args, labels_df)
+    if args.classifier == "KNN":
+        run_knn_experiment(args, labels_df)
     else:
         raise ValueError(f"Unsupported classifier: {args.classifier}")
 

@@ -74,7 +74,7 @@ SVM feature-selection arguments:
 - `--svm_feature_selector rfe|sfs|rfecv`
 - `--top_k` applies to `rfe` and `sfs`; `rfecv` chooses automatically.
 - RFE uses `step=1` fixed in code. Do not expose `--rfe_step` unless the user explicitly revises this.
-- RFECV has a hard-coded maximum feature count of `35`. If RFECV selects more than 35 features, raise an error rather than silently proceeding.
+- RFECV has a hard-coded maximum feature count of `35`. If RFECV selects more than 35 features, skip the current experiment, write `SKIPPED.json`, and continue the shell runner.
 
 SVM model configuration:
 
@@ -118,7 +118,7 @@ LR feature selection is currently limited to LASSO:
 - `--lr_feature_selector lasso`
 - `--top_k 15|20|25|None`
 
-When `top_k` is `None`, use all LASSO non-zero features. If the number of non-zero features exceeds the hard-coded limit of `35`, raise an error rather than proceeding. LASSO uses `LogisticRegressionCV` with `penalty="l1"`, `solver="liblinear"`, and `Cs=30` unless the user explicitly revises this.
+When `top_k` is `None`, use all LASSO non-zero features. If the number of non-zero features exceeds the hard-coded limit of `35`, skip the current experiment, write `SKIPPED.json`, and continue the shell runner. LASSO uses `LogisticRegressionCV` with `penalty="l1"`, `solver="liblinear"`, and `Cs=30` unless the user explicitly revises this.
 
 Final LR classifier configuration:
 
@@ -150,7 +150,7 @@ XGBoost feature-selection options:
 - `--xgb_feature_selector rfe|sfs|rfecv`
 - `--top_k` applies to `rfe` and `sfs`; do not hard-limit accepted top-K values in the Python parser.
 - `rfecv` chooses feature count automatically and does not use `top_k`.
-- RFECV has a hard-coded maximum feature count of `50`. If RFECV selects more than 50 features, raise an error rather than proceeding.
+- RFECV has a hard-coded maximum feature count of `50`. If RFECV selects more than 50 features, skip the current experiment, write `SKIPPED.json`, and continue the shell runner.
 - Starting with XGBoost and later classifiers, do not print every selected feature to stdout; print only the selected feature count and output path.
 
 XGBoost model configuration:
@@ -172,6 +172,69 @@ param_grid_xgb = {
 ```
 
 `XGBoost.sh` should sweep random states, RFE/SFS top-K values, and RFECV according to the user's current experiment plan.
+
+## Random Forest Branch
+
+Random Forest uses a dedicated pair:
+
+- `whole_image/RF.py`
+- `whole_image/RF.sh`
+
+Random Forest feature-selection options:
+
+- `--rf_feature_selector rfe|sfs|rfecv`
+- `--top_k` applies to `rfe` and `sfs`; do not hard-limit accepted top-K values in the Python parser.
+- `rfecv` chooses feature count automatically and does not use `top_k`.
+- RFECV has a hard-coded maximum feature count of `35`. If RFECV selects more than 35 features, skip the current experiment, write `SKIPPED.json`, and continue the shell runner.
+- Do not print every selected feature to stdout; print only selected feature count and output path.
+
+Random Forest model configuration:
+
+- Use `class_weight="balanced"`.
+- Use `random_state` from the script argument.
+- Use `n_jobs=-1` unless the user reports parallel instability.
+
+Current Random Forest grid:
+
+```python
+param_grid_rf = {
+    "n_estimators": [100, 300, 500],
+    "max_depth": [None, 3, 5],
+    "max_features": ["sqrt", "log2"],
+}
+```
+
+`RF.sh` should sweep random states, RFE/SFS top-K values, and RFECV according to the user's current experiment plan.
+
+## KNN Branch
+
+KNN uses a dedicated pair:
+
+- `whole_image/KNN.py`
+- `whole_image/KNN.sh`
+
+KNN feature selection is currently limited to SFS:
+
+- `--knn_feature_selector sfs`
+- `--top_k` controls SFS-selected feature count; do not hard-limit accepted top-K values in the Python parser.
+
+KNN cannot use RFE/RFECV directly because it has no `coef_` or `feature_importances_`. Use `SequentialFeatureSelector` with a standardized KNN pipeline.
+
+KNN model configuration:
+
+- Use `StandardScaler` before `KNeighborsClassifier`.
+- KNN has no classifier-level random seed; `random_state` still controls patient split and SFS CV.
+
+Current KNN grid:
+
+```python
+param_grid_knn = {
+    "clf__n_neighbors": [3, 7, 9, 11],
+    "clf__weights": ["uniform", "distance"],
+}
+```
+
+`KNN.sh` should sweep random states and SFS top-K values according to the user's current experiment plan.
 
 ## Reporting
 

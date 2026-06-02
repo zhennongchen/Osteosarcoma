@@ -46,6 +46,12 @@ WHOLE_IMAGE_RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image
 WHOLE_IMAGE_MODEL_OUT_DIR = "/host/d/projects/Habitats/models/whole_image"
 
 
+class SkipExperiment(Exception):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run whole-image radiomics A-line ML experiments."
@@ -224,7 +230,7 @@ def select_svm_features(feature_selector, top_k, feature_cols, X, y, random_stat
     selected_features = [f for f, keep in zip(feature_cols, support) if keep]
 
     if feature_selector == "rfecv" and len(selected_features) > RFECV_MAX_FEATURES:
-        raise ValueError(
+        raise SkipExperiment(
             f"RFECV selected {len(selected_features)} features, "
             f"which exceeds the hard limit of {RFECV_MAX_FEATURES}."
         )
@@ -356,29 +362,60 @@ def best_threshold_metrics(y_true, y_prob):
     }
 
 
+def get_svm_experiment_name(random_state, feature_selector, top_k):
+    experiment_name = f"random{random_state}_{feature_selector}"
+    if feature_selector in {"rfe", "sfs"}:
+        experiment_name += f"_top{top_k}"
+    return experiment_name
+
+
+def write_skip_file(out_dir, args, reason):
+    os.makedirs(out_dir, exist_ok=True)
+    skip_info = {
+        "classifier": "SVM",
+        "random_state": args.random_state,
+        "feature_selector": args.svm_feature_selector,
+        "top_k": None if args.svm_feature_selector == "rfecv" else args.top_k,
+        "status": "skipped",
+        "reason": reason,
+    }
+    skip_path = os.path.join(out_dir, "SKIPPED.json")
+    with open(skip_path, "w") as f:
+        json.dump(skip_info, f, indent=4)
+    print("Skipped experiment:", reason)
+    print("Saved skip record:", skip_path)
+
+
 def run_svm_experiment(args, labels_df):
     radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(
         PCC_RADIOMICS_PATH,
         labels_df,
     )
-    selected_path, selected_features = load_or_select_svm_features(
-        radiomics_df=radiomics_df,
+    experiment_name = get_svm_experiment_name(
+        random_state=args.random_state,
         feature_selector=args.svm_feature_selector,
         top_k=args.top_k,
-        feature_cols=feature_cols,
-        X=X,
-        y=y,
-        random_state=args.random_state,
     )
+    out_dir = os.path.join(WHOLE_IMAGE_MODEL_OUT_DIR, "SVM", experiment_name)
+
+    try:
+        selected_path, selected_features = load_or_select_svm_features(
+            radiomics_df=radiomics_df,
+            feature_selector=args.svm_feature_selector,
+            top_k=args.top_k,
+            feature_cols=feature_cols,
+            X=X,
+            y=y,
+            random_state=args.random_state,
+        )
+    except SkipExperiment as exc:
+        write_skip_file(out_dir, args, exc.reason)
+        return
 
     selected_df = pd.read_excel(selected_path)
     selected_feature_cols = get_feature_cols_from_selected_table(selected_df)
     X_selected = merged_df[selected_feature_cols].values
 
-    experiment_name = f"random{args.random_state}_{args.svm_feature_selector}"
-    if args.svm_feature_selector in {"rfe", "sfs"}:
-        experiment_name += f"_top{args.top_k}"
-    out_dir = os.path.join(WHOLE_IMAGE_MODEL_OUT_DIR, "SVM", experiment_name)
     os.makedirs(out_dir, exist_ok=True)
 
     svm_pipe = make_linear_svm_pipeline(random_state=args.random_state)
