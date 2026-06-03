@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_SCRIPT="${SCRIPT_DIR}/RF.py"
 
 for RANDOM_STATE in 0 30 60; do
-  for selector in rfe sfs; do
+  for selector in rfe; do
     for top_k in 15 20 25; do
       echo "========== RF | random_state=${RANDOM_STATE} | selector=${selector} | top_k=${top_k} =========="
       python3 "${PYTHON_SCRIPT}" \

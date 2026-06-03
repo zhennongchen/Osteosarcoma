@@ -1,0 +1,80 @@
+# MR_setting_habitat_voxel_Wang26.yaml
+# Voxel-based habitat feature map extraction based on Wang et al.
+# Osteosarcoma MRI habitat analysis.
+#
+# Usage:
+# extractor = featureextractor.RadiomicsFeatureExtractor(paramPath)
+# result = extractor.execute(image_path, mask_path, voxelBased=True)
+
+imageType:
+  Original: {}
+
+featureClass:
+  firstorder:
+    - 10Percentile
+    - 90Percentile
+    - Energy
+    - Mean
+    - Median
+    - Minimum
+    - RootMeanSquared
+
+  glcm:
+    - Autocorrelation
+    - JointAverage
+
+  gldm:
+    - DependenceEntropy
+    - GrayLevelNonUniformity
+    - HighGrayLevelEmphasis
+    - LargeDependenceLowGrayLevelEmphasis
+    - LowGrayLevelEmphasis
+    - SmallDependenceHighGrayLevelEmphasis
+
+  glrlm:
+    - GrayLevelNonUniformity
+    - HighGrayLevelRunEmphasis
+    - LongRunHighGrayLevelEmphasis
+    - LongRunLowGrayLevelEmphasis
+    - LowGrayLevelRunEmphasis
+    - RunLengthNonUniformity
+    - RunPercentage
+    - RunVariance
+    - ShortRunHighGrayLevelEmphasis
+
+  ngtdm:
+    - Coarseness
+
+setting:
+  # Image intensity normalization before feature extraction.
+  normalize: true
+  normalizeScale: 100
+
+  # Resample image and mask to isotropic 1 mm voxels.
+  interpolator: 'sitkBSpline'
+  resampledPixelSpacing: [1, 1, 1]
+
+  # Wang et al. used binWidth = 25 for voxel-based feature maps.
+  binWidth: 25
+
+  # When normalization is enabled, voxel intensities may be negative.
+  # Shift is commonly used in MRI PyRadiomics settings.
+  voxelArrayShift: 300
+
+  # Mask label.
+  label: 1
+
+  geometryTolerance: 0.0001
+
+voxelSetting:
+  # R = 1, so kernel size = 2R + 1 = 3×3×3.
+  kernelRadius: 1
+
+  # Only include voxels inside tumor mask when computing local features.
+  maskedKernel: true
+
+  # Values outside valid voxel positions are initialized as NaN.
+  initValue: nan
+
+  # Controls memory/speed tradeoff for voxel-based extraction.
+  voxelBatch: 10000

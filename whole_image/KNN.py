@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.feature_selection import SequentialFeatureSelector
@@ -139,6 +140,25 @@ def load_features_and_labels(radiomics_path, labels_df):
     )
 
     return radiomics_df, merged_df, feature_cols, X, y, folds
+
+
+def plot_roc_curve(y_true, y_prob, title, save_path, figsize=(5, 5)):
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    auc_value = roc_auc_score(y_true, y_prob)
+
+    plt.figure(figsize=figsize)
+    plt.plot(fpr, tpr, lw=2, label=f"ROC (AUC = {auc_value:.3f})")
+    plt.plot([0, 1], [0, 1], "--", lw=1)
+    plt.xlim([0, 1])
+    plt.ylim([0, 1.05])
+    plt.xlabel("False Positive Rate", fontsize=13)
+    plt.ylabel("True Positive Rate", fontsize=13)
+    plt.title(title, fontsize=14)
+    plt.legend(loc="lower right")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
 
 
 def get_feature_cols_from_selected_table(selected_df):
@@ -324,7 +344,7 @@ def run_knn_experiment(args, labels_df):
 
     knn_pipe = make_knn_pipeline()
     param_grid_knn = {
-        "clf__n_neighbors": [3, 7, 9, 11],
+        "clf__n_neighbors": [3, 5, 7, 9, 11],
         "clf__weights": ["uniform", "distance"],
     }
     inner_cv = StratifiedKFold(
@@ -422,7 +442,16 @@ def run_knn_experiment(args, labels_df):
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=4)
 
+    roc_path = os.path.join(out_dir, "ROC_curve_5foldCV_KNN.pdf")
+    plot_roc_curve(
+        y_true,
+        y_prob,
+        title="ROC curve 5-fold CV - KNN",
+        save_path=roc_path,
+    )
+
     print("\n========== KNN Summary ==========")
+    print("Saved ROC curve:", roc_path)
     print("Output directory:", out_dir)
     print("Best params:", best_params)
     print(f"Fold AUCs: {[round(x, 4) for x in fold_aucs]}")

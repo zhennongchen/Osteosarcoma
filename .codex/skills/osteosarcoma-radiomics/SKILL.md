@@ -236,6 +236,79 @@ param_grid_knn = {
 
 `KNN.sh` should sweep random states and SFS top-K values according to the user's current experiment plan.
 
+
+
+## Traditional Habitat Direction
+
+The project direction for habitat analysis has changed. Do not continue the earlier idea of training a whole-tumor classifier and directly applying it to patch-level radiomics probabilities to define high-risk/low-risk ROIs. That approach exposed a major distribution shift: patch-level radiomics features, even after applying whole-image min-max normalization, often fall far outside the `[0, 1]` range learned by whole-tumor models. This makes direct whole-tumor classifier projection onto patches unreliable for this dataset.
+
+Current habitat strategy: use traditional unsupervised habitat analysis, following the Wang osteosarcoma MRI habitat paper as the primary reference.
+
+Core Wang-style workflow:
+
+1. Use voxel-based feature maps, not manually generated patch masks.
+2. Use PyRadiomics `execute(..., voxelBased=True)` on the whole tumor mask to generate feature maps.
+3. Use image/mask preprocessing from YAML: MRI normalization, `normalizeScale: 100`, B-spline interpolation, and `resampledPixelSpacing: [1, 1, 1]`.
+4. Use voxel-based local window setting `kernelRadius: 1`, which corresponds to a `3 x 3 x 3` sliding window.
+5. Use Wang's 26 voxel-based radiomic feature maps as the primary clustering feature set.
+6. Perform K-means clustering within each case on tumor voxels only.
+7. Use case-specific K, not a fixed cohort-wide K, with candidate values `K = 3, 4, 5`.
+8. Select each case's K by maximizing voxel-wise Silhouette Coefficient (SC).
+9. After habitats are generated, extract radiomics from each habitat ROI and combine habitat features using Wang's area/volume-weighted formula: `H_feature = sum_i A_i * feature_i`, where `A_i` is the area/volume fraction of the i-th habitat.
+10. Because the final H-radiomics value is area/volume-weighted over habitats, case-specific K is acceptable: every patient still gets the same final feature dimensions.
+
+Primary Wang-26 voxel feature maps:
+
+Firstorder:
+
+- `10Percentile`
+- `90Percentile`
+- `Energy`
+- `Mean`
+- `Median`
+- `Minimum`
+- `RootMeanSquared`
+
+GLCM:
+
+- `Autocorrelation`
+- `JointAverage`
+- `SumAverage`
+
+GLDM:
+
+- `DependenceEntropy`
+- `GrayLevelNonUniformity`
+- `HighGrayLevelEmphasis`
+- `LargeDependenceLowGrayLevelEmphasis`
+- `LowGrayLevelEmphasis`
+- `SmallDependenceHighGrayLevelEmphasis`
+
+GLRLM:
+
+- `GrayLevelNonUniformity`
+- `HighGrayLevelRunEmphasis`
+- `LongRunHighGrayLevelEmphasis`
+- `LongRunLowGrayLevelEmphasis`
+- `LowGrayLevelRunEmphasis`
+- `RunLengthNonUniformity`
+- `RunPercentage`
+- `RunVariance`
+- `ShortRunHighGrayLevelEmphasis`
+
+NGTDM:
+
+- `Coarseness`
+
+Recommended YAML for voxel habitat maps should include only `Original` image type, no `shape`, no Wavelet/LoG for clustering in the first implementation, `binWidth: 25`, `voxelSetting.kernelRadius: 1`, `maskedKernel: true`, `initValue: nan`, and a reasonable `voxelBatch` such as `10000`.
+
+Important interpretation notes:
+
+- The old high-risk ROI idea is paused/deprecated. Do not assume patch-wise probabilities from a whole-tumor classifier are valid.
+- Traditional habitats do not require defining a universal high-risk cluster label across patients if using Wang's weighted H-radiomics formula.
+- Record each patient's SC values for `K=3,4,5`, selected K, selected SC, cluster voxel counts, and habitat area/volume fractions for QC and reporting.
+- If using a fixed cohort-wide K in a future sensitivity analysis, compute SC per case per K and average case-level SC across the cohort; do not pool all voxels from all cases as if they were independent samples from one tumor.
+
 ## Reporting
 
 For each experiment combination, save outputs in parameter-specific directories so results do not overwrite each other.
