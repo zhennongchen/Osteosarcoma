@@ -250,14 +250,14 @@ Core Wang-style workflow:
 2. Use PyRadiomics `execute(..., voxelBased=True)` on the whole tumor mask to generate feature maps.
 3. Use image/mask preprocessing from YAML: MRI normalization, `normalizeScale: 100`, B-spline interpolation, and `resampledPixelSpacing: [1, 1, 1]`.
 4. Use voxel-based local window setting `kernelRadius: 1`, which corresponds to a `3 x 3 x 3` sliding window.
-5. Use Wang's 26 voxel-based radiomic feature maps as the primary clustering feature set.
+5. Use a Wang-derived voxel-based radiomic feature map set as the primary clustering feature set. The original Wang list has 26 features, but this project removes `GLCM SumAverage` because PyRadiomics warns that, with symmetrical GLCM, `SumAverage = 2 * JointAverage`; keeping both would duplicate the same information and overweight that direction in K-means. The active project set is therefore Wang-25.
 6. Perform K-means clustering within each case on tumor voxels only.
 7. Use case-specific K, not a fixed cohort-wide K, with candidate values `K = 3, 4, 5`.
 8. Select each case's K by maximizing voxel-wise Silhouette Coefficient (SC).
 9. After habitats are generated, extract radiomics from each habitat ROI and combine habitat features using Wang's area/volume-weighted formula: `H_feature = sum_i A_i * feature_i`, where `A_i` is the area/volume fraction of the i-th habitat.
 10. Because the final H-radiomics value is area/volume-weighted over habitats, case-specific K is acceptable: every patient still gets the same final feature dimensions.
 
-Primary Wang-26 voxel feature maps:
+Primary Wang-derived voxel feature maps, active Wang-25 set:
 
 Firstorder:
 
@@ -273,7 +273,6 @@ GLCM:
 
 - `Autocorrelation`
 - `JointAverage`
-- `SumAverage`
 
 GLDM:
 
@@ -300,7 +299,7 @@ NGTDM:
 
 - `Coarseness`
 
-Recommended YAML for voxel habitat maps should include only `Original` image type, no `shape`, no Wavelet/LoG for clustering in the first implementation, `binWidth: 25`, `voxelSetting.kernelRadius: 1`, `maskedKernel: true`, `initValue: nan`, and a reasonable `voxelBatch` such as `10000`.
+Recommended YAML for voxel habitat maps should include only `Original` image type, no `shape`, no Wavelet/LoG for clustering in the first implementation, `binWidth: 25`, `voxelSetting.kernelRadius: 1`, `maskedKernel: true`, `initValue: nan`, and a reasonable `voxelBatch` such as `10000`. Do not include `GLCM SumAverage` in the active YAML unless the user explicitly asks to reproduce the exact original Wang-26 list despite the redundancy warning.
 
 Important interpretation notes:
 
