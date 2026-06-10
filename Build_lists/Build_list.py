@@ -9,8 +9,8 @@ class Build():
         self.file_list = file_list
         self.data = pd.read_excel(file_list, dtype = {'Patient_index': str})
         # exclude the ones with column "Include" not equal to "Yes"
-        if 'Include' in self.data.columns:
-            self.data = self.data[self.data['Include'] == 'Yes'].reset_index(drop=True)
+        # if 'Include' in self.data.columns:
+        #     self.data = self.data[self.data['Include'] == 'Yes'].reset_index(drop=True)
 
     def __build__(self,batch_list = None, index_list = None):
         # assert batch_list and index list are not both None or both not None
