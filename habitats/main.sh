@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Edit these variables for a run.
+TASK="${TASK:-Prognosis}"
+METHOD_LIST="${METHOD_LIST:-SVM LR RF KNN XGBoost}"
+RANDOM_STATE_LIST="${RANDOM_STATE_LIST:-0 15 30 45 60}"
+TOP_K_LIST="${TOP_K_LIST:-7 10 12 13 15 17 20 22 25 27 30}"
+
+# LR can include None in addition to numeric top_k values.
+LR_TOP_K_LIST="${LR_TOP_K_LIST:-None ${TOP_K_LIST}}"
+
+export TASK RANDOM_STATE_LIST TOP_K_LIST LR_TOP_K_LIST
+
+echo "========== Main settings =========="
+echo "TASK=${TASK}"
+echo "METHOD_LIST=${METHOD_LIST}"
+echo "RANDOM_STATE_LIST=${RANDOM_STATE_LIST}"
+echo "TOP_K_LIST=${TOP_K_LIST}"
+echo "LR_TOP_K_LIST=${LR_TOP_K_LIST}"
+
+for method in ${METHOD_LIST}; do
+  method_script="${method}.sh"
+  if [[ ! -f "${SCRIPT_DIR}/${method_script}" ]]; then
+    echo "Missing method script: ${SCRIPT_DIR}/${method_script}" >&2
+    exit 1
+  fi
+  echo "========== Running ${method_script} | task=${TASK} =========="
+  bash "${SCRIPT_DIR}/${method_script}"
+done
+
+echo "========== Summarizing selected methods | task=${TASK} =========="
+python3 "${SCRIPT_DIR}/summarize.py" --task "${TASK}"

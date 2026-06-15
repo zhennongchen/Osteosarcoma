@@ -19,9 +19,6 @@ for selector in rfe sfs; do
       --top_k "${top_k}"
   done
 done
-done
-
-for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
 echo "========== SVM | task=${TASK} | random_state=${RANDOM_STATE} | selector=rfecv =========="
 python3 "${PYTHON_SCRIPT}" \
   --classifier SVM \

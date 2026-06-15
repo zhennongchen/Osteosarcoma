@@ -40,18 +40,18 @@ SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
     "image_label_info_set12_5fold_{task_lower}_random{random_state}.xlsx"
 )
-PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/whole_image/radiomics_measurements_PCC.xlsx"
-RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image"
-SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image/select"
+PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/habitats/habitat_radiomics_measurements_avg_PCC.xlsx"
+RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats"
+SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats/select"
 MODEL_ROOT = "/host/d/projects/Habitats/models"
-IMAGE_TYPE = "whole_image"
-CLASSIFIER_ARG = "RF"
-CLASSIFIER_NAME = "RandomForest"
-CLASSIFIER_DIR = "RandomForest"
-MODEL_LABEL = "Random Forest"
-SELECTOR_ARG = "rf_feature_selector"
-DEFAULT_SELECTOR = "rfe"
-SELECTED_PREFIX = "radiomics_measurements"
+IMAGE_TYPE = "habitats"
+CLASSIFIER_ARG = "LR"
+CLASSIFIER_NAME = "LR"
+CLASSIFIER_DIR = "LR"
+MODEL_LABEL = "Logistic Regression"
+SELECTOR_ARG = "lr_feature_selector"
+DEFAULT_SELECTOR = "lasso"
+SELECTED_PREFIX = "habitat_radiomics_measurements"
 METRIC_KEYS = ["auc", "accuracy", "sensitivity", "specificity"]
 FEATURE_SELECTION_SCOPE = "all_330_train_plus_internal_test"
 
@@ -66,13 +66,13 @@ def parse_top_k(value):
     if value is None:
         return None
     if isinstance(value, str) and value.lower() == "none":
-        if False:
+        if True:
             return None
         raise argparse.ArgumentTypeError("top_k cannot be None for this classifier")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError("top_k must be an integer" + (" or None" if False else "")) from exc
+        raise argparse.ArgumentTypeError("top_k must be an integer" + (" or None" if True else "")) from exc
 
 
 def top_k_label(top_k):
@@ -82,11 +82,11 @@ def top_k_label(top_k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run whole-image radiomics RF experiments.")
+    parser = argparse.ArgumentParser(description="Run habitat weighted-average radiomics LR experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
-    parser.add_argument("--rf_feature_selector", choices=['rfe', 'sfs', 'rfecv'], default=DEFAULT_SELECTOR)
+    parser.add_argument("--lr_feature_selector", choices=['lasso'], default=DEFAULT_SELECTOR)
     parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Ignored for RFECV.")
     return parser.parse_args()
 

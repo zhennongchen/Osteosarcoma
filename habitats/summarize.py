@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize whole-image ML experiment outputs into full and compact Excel sheets."""
+"""Summarize habitat weighted-average ML experiment outputs into full and compact Excel sheets."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ import pandas as pd
 
 DEFAULT_TASK = "Prognosis"
 MODEL_ROOT = Path("/host/d/projects/Habitats/models")
-IMAGE_TYPE = "whole_image"
-DEFAULT_OUTPUT_NAME = "whole_image_model_summary.xlsx"
+IMAGE_TYPE = "habitats"
+DEFAULT_OUTPUT_NAME = "habitat_model_summary.xlsx"
 PREFERRED_CLASSIFIER_ORDER = ["SVM", "LR", "XGBoost", "RandomForest", "KNN"]
 EXPERIMENT_RE = re.compile(
     r"^random(?P<random_state>\d+)_(?P<feature_selector>[^_]+)(?:_(?P<top_label>none|top\d+)|_top(?P<top_k>.+))?$",
@@ -86,7 +86,7 @@ COMPACT_COLUMNS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create Excel summaries for whole-image ML experiments.")
+    parser = argparse.ArgumentParser(description="Create Excel summaries for habitat weighted-average ML experiments.")
     parser.add_argument("--task", choices=["Prognosis", "Pathologic"], default=DEFAULT_TASK)
     parser.add_argument(
         "--models_root",

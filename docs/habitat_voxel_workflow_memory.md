@@ -56,3 +56,9 @@ Final habitat PCC feature count: 275. Input is `/host/d/projects/Habitats/radiom
 ## Whole-Image ML Memory for Habitat Port
 
 Whole-image scripts are in `/host/d/Github/Osteosarcoma/whole_image`: `LR.py`, `SVM.py`, `RF.py`, `KNN.py`, `XGBoost.py` plus matching `.sh` files and `summarize.py`. They use `Prognosis_label`, 5-fold stratified splits, seeds `0/30/60`, top_k `15/20/25`, and output predictions/fold metrics/summary JSON/ROC curves under `/host/d/projects/Habitats/models/whole_image`. Port habitat ML by changing the input to `habitat_radiomics_measurements_avg_PCC.xlsx`, selected-feature outputs to `/host/d/projects/Habitats/radiomics/habitats`, and model outputs to `/host/d/projects/Habitats/models/habitats`, while keeping the same folds and grids.
+
+## Task-Aware Habitat ML Memory
+
+Habitat ML scripts now support two tasks through `--task Prognosis` or `--task Pathologic`. `TASK_TO_LABEL_COL` maps `Prognosis` to `Prognosis_label` and `Pathologic` to `Pathologic_label`. Shell scripts have `TASK="Prognosis"` at the top; change it to `Pathologic` to run that task.
+
+Task controls the label column, split file name, selected-feature filename, and model output root. Habitat model outputs now go under `/host/d/projects/Habitats/models/{TASK}/habitats/`, while selected-feature tables stay under `/host/d/projects/Habitats/radiomics/habitats/` but include the task name in the filename. `habitats/summarize.py` also accepts `--task` and summarizes `/models/{TASK}/habitats` by default.

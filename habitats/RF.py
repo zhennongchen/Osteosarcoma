@@ -40,18 +40,18 @@ SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
     "image_label_info_set12_5fold_{task_lower}_random{random_state}.xlsx"
 )
-PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/whole_image/radiomics_measurements_PCC.xlsx"
-RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image"
-SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image/select"
+PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/habitats/habitat_radiomics_measurements_avg_PCC.xlsx"
+RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats"
+SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats/select"
 MODEL_ROOT = "/host/d/projects/Habitats/models"
-IMAGE_TYPE = "whole_image"
+IMAGE_TYPE = "habitats"
 CLASSIFIER_ARG = "RF"
 CLASSIFIER_NAME = "RandomForest"
 CLASSIFIER_DIR = "RandomForest"
 MODEL_LABEL = "Random Forest"
 SELECTOR_ARG = "rf_feature_selector"
 DEFAULT_SELECTOR = "rfe"
-SELECTED_PREFIX = "radiomics_measurements"
+SELECTED_PREFIX = "habitat_radiomics_measurements"
 METRIC_KEYS = ["auc", "accuracy", "sensitivity", "specificity"]
 FEATURE_SELECTION_SCOPE = "all_330_train_plus_internal_test"
 
@@ -82,7 +82,7 @@ def top_k_label(top_k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run whole-image radiomics RF experiments.")
+    parser = argparse.ArgumentParser(description="Run habitat weighted-average radiomics RF experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)

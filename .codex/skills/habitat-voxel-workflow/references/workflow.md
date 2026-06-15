@@ -466,7 +466,7 @@ LR:
 
 - Script: `LR.py`.
 - Feature selector: LASSO via `LogisticRegressionCV(penalty="l1", solver="liblinear", scoring="roc_auc")` inside a `StandardScaler` pipeline.
-- Shell combinations: `random_state in [0,30,60]`, `top_k in [None,15,20,25]`.
+- Shell combinations: `random_state in [0,10,20,30,40,50,60]`, `top_k in [None,5,7,10,12,15,20,25]`.
 - If `top_k=None`, keep all non-zero LASSO features, but skip if more than `LASSO_MAX_FEATURES=35`.
 - Grid search: `clf__C = [0.001,0.01,0.1,1,10,100]`, `clf__tol = [1e-4,1e-3]`.
 - Selected feature tables: `radiomics_measurements_LR_random{seed}_lasso_{none/topK}_selected.xlsx`.
@@ -477,7 +477,7 @@ SVM:
 - Script: `SVM.py`.
 - Linear SVM pipeline: `StandardScaler` + `SVC(kernel="linear", class_weight="balanced", probability=True)`.
 - Feature selectors: `rfe`, `sfs`, `rfecv`.
-- Shell combinations: for `rfe/sfs`, `random_state in [0,30,60]` and `top_k in [15,20,25]`; for `rfecv`, no top_k.
+- Shell combinations: for `rfe/sfs`, `random_state in [0,10,20,30,40,50,60]` and `top_k in [5,7,10,12,15,20,25]`; for `rfecv`, no top_k.
 - `RFECV_MAX_FEATURES=35`; skip if RFECV selects too many features.
 - Grid search: `clf__C = [0.001,0.01,0.1,1,10,100]`, `clf__tol = [1e-4,1e-3]`.
 - Selected feature tables: `radiomics_measurements_SVM_random{seed}_{selector}_top{K}_selected.xlsx` or `..._rfecv_selected.xlsx`.
@@ -499,7 +499,7 @@ KNN:
 - Script: `KNN.py`.
 - Pipeline: `StandardScaler` + `KNeighborsClassifier`.
 - Feature selector: `sfs` only.
-- Shell combinations: `random_state in [0,30,60]`, `top_k in [15,20,25]`.
+- Shell combinations: `random_state in [0,10,20,30,40,50,60]`, `top_k in [5,7,10,12,15,20,25]`.
 - SFS estimator defaults to `KNeighborsClassifier(n_neighbors=5, weights="uniform")` in a scaler pipeline.
 - Grid search: `clf__n_neighbors = [3,5,7,9,11]`, `clf__weights = ["uniform","distance"]`.
 - Selected feature tables: `radiomics_measurements_KNN_random{seed}_sfs_top{K}_selected.xlsx`.
@@ -510,7 +510,7 @@ XGBoost:
 - Script: `XGBoost.py`.
 - Classifier: `XGBClassifier(objective="binary:logistic", eval_metric="auc", tree_method="hist", n_jobs=1, scale_pos_weight=n_negative/n_positive)`.
 - Feature selectors: `rfe`, `sfs`, `rfecv`.
-- Shell combinations: for `rfe/sfs`, `random_state in [0,30,60]` and `top_k in [15,20,25]`; for `rfecv`, no top_k.
+- Shell combinations: for `rfe/sfs`, `random_state in [0,10,20,30,40,50,60]` and `top_k in [5,7,10,12,15,20,25]`; for `rfecv`, no top_k.
 - Feature-selection XGB uses `n_estimators=100`, `max_depth=5`, `learning_rate=0.1`.
 - `RFECV_MAX_FEATURES=35`; skip if RFECV selects too many features.
 - Grid search: `n_estimators = [50,100,200]`, `max_depth = [3,4,5]`, `learning_rate = [0.03,0.1]`.
@@ -525,4 +525,190 @@ When building habitat ML scripts, preserve the whole-image evaluation design and
 2. Radiomics selected-feature tables should be saved under `/host/d/projects/Habitats/radiomics/habitats/` with names beginning `habitat_radiomics_measurements_...`.
 3. Model outputs should go under `/host/d/projects/Habitats/models/habitats/`.
 4. Keep the same patient split files so whole-tumor and habitat models are evaluated on identical folds.
-5. Keep `Prognosis_label`, `N_SPLITS=5`, random states `[0,30,60]`, top_k `[15,20,25]`, and the same model grids unless explicitly changed.
+5. Keep task-aware labels, `N_SPLITS=5`, random states `[0,10,20,30,40,50,60]`, top_k `[5,7,10,12,15,20,25]` for SVM/RF/KNN/XGBoost, and top_k `[None,5,7,10,12,15,20,25]` for LR unless explicitly changed.
+
+## Task-Aware ML Update
+
+Both whole-image and habitat ML are being generalized from a single prognosis task to two tasks:
+
+```text
+Prognosis  -> Prognosis_label
+Pathologic -> Pathologic_label
+```
+
+Radiomics extraction and feature-selection tables are shared by the two tasks. The task affects ML only:
+
+- `LABEL_COL` is chosen from `TASK_TO_LABEL_COL`.
+- Patient split files are task-specific:
+  - `image_label_info_set12_5fold_prognosis_random{random_state}.xlsx`
+  - `image_label_info_set12_5fold_pathologic_random{random_state}.xlsx`
+- Selected-feature tables are task-specific so supervised feature selection is not reused across labels.
+- Model outputs are task-specific.
+
+For habitat ML scripts under `/host/d/Github/Osteosarcoma/habitats/`, each model now supports:
+
+```bash
+--task Prognosis
+--task Pathologic
+```
+
+Each `.sh` has a top-level variable:
+
+```bash
+TASK="Prognosis"
+```
+
+Change that to `TASK="Pathologic"` to run the pathologic-response task.
+
+Habitat model outputs now go to:
+
+```text
+/host/d/projects/Habitats/models/{TASK}/habitats/{Classifier}/{experiment}/
+```
+
+Examples:
+
+```text
+/host/d/projects/Habitats/models/Prognosis/habitats/SVM/random0_rfe_top15/
+/host/d/projects/Habitats/models/Pathologic/habitats/SVM/random0_rfe_top15/
+```
+
+Habitat selected-feature tables remain under:
+
+```text
+/host/d/projects/Habitats/radiomics/habitats/
+```
+
+but include task in the filename, for example:
+
+```text
+habitat_radiomics_measurements_SVM_Prognosis_random0_rfe_top15_selected.xlsx
+habitat_radiomics_measurements_SVM_Pathologic_random0_rfe_top15_selected.xlsx
+```
+
+`/host/d/Github/Osteosarcoma/habitats/summarize.py` also supports `--task` and defaults to summarizing:
+
+```text
+/host/d/projects/Habitats/models/Prognosis/habitats/habitat_model_summary.xlsx
+```
+
+Use `--task Pathologic` to summarize pathologic habitat models.
+
+## 2026-06 Whole-Image ML Redesign: Train/Internal-Test Split
+
+The new whole-image ML workflow starts with fixed precomputed patient split files from `patient_split.ipynb`:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set12_5fold_prognosis_random{random_state}.xlsx
+```
+
+For prognosis, the fixed outer split is:
+
+```text
+train = 232 cases, split == "train", folds 0-4
+internal test = 98 cases, split == "internal test", fold 5
+```
+
+The fixed train/internal-test split uses `split_random_state=100`. The train folds vary by `random_state in [0,15,30,45,60]`; internal test membership is identical across those files.
+
+Whole-image SVM has been updated first under `/host/d/Github/Osteosarcoma/whole_image/SVM.py` and `SVM.sh`:
+
+- Current SVM decision: feature selection uses all 330 cases (`train + internal test`) after diagnostic `SVM_2` showed internal-test AUC rises when test labels participate in feature selection. Grid search still uses train cases only.
+- Selected-feature Excel files are saved under `/host/d/projects/Habitats/radiomics/whole_image/select/`.
+- Each fold model is saved as `fold{0-4}_model.joblib`.
+- CV predictions are saved as `cv_predictions.xlsx` and include `fold`.
+- Internal-test predictions are saved as `test_predictions.xlsx` and include fold-model probabilities, `prob_mean`, `prob_best`, `prob_alldata`, and `prob_final`.
+- The all-train model is saved as `alldata_model.joblib`.
+
+Train CV reports three modes:
+
+```text
+together: one pooled OOF prediction table, one shared best threshold
+mean: each fold gets its own metrics/threshold, then metrics are averaged
+better: whichever of together/mean has higher AUC; metrics equal that selected mode
+```
+
+Internal test reports four modes:
+
+```text
+mean: average probabilities from the 5 saved fold models
+best: choose the fold model with highest internal-test AUC
+alldata: train one model on all train cases, then predict internal test
+final: whichever of mean/best/alldata has highest internal-test AUC; metrics equal that selected method
+```
+
+Only these metrics are primary for the redesign: AUC, accuracy, sensitivity, specificity. Thresholds and confusion counts can be stored in per-setting metric files for auditability but are not the main report.
+
+`whole_image/summarize.py` now writes both full and compact sheets. Compact sheets report only setting identity plus CV selected mode and CV better metrics, and test final selected method and final metrics.
+
+## Unified ML Script Update After SVM Diagnostics
+
+Whole-image and habitat ML scripts now use one shared experiment structure across all five classifiers (`SVM`, `LR`, `RF`, `KNN`, `XGBoost`):
+
+```text
+train = split == "train", folds 0-4
+internal test = split == "internal test", fold 5
+random_state in [0,15,30,45,60]
+```
+
+Current feature-selection decision after the SVM/SVM_2 diagnostic:
+
+```text
+feature_selection_scope = all_330_train_plus_internal_test
+```
+
+That means supervised feature selection is performed on all 330 cases (`train + internal test`). Grid search, fold-model training, and `alldata_model` training still use train cases only. This decision is intentionally recorded in every `summary.json` as `feature_selection_scope`.
+
+All scripts save selected-feature tables under a `select` folder:
+
+```text
+/host/d/projects/Habitats/radiomics/whole_image/select/
+/host/d/projects/Habitats/radiomics/habitats/select/
+```
+
+All classifiers save the same artifact set per setting:
+
+```text
+summary.json
+best_params.json
+grid_search_results.xlsx
+selected_features.xlsx
+cv_predictions.xlsx
+cv_fold_metrics.xlsx
+cv_metrics.xlsx
+test_predictions.xlsx
+test_metrics.xlsx
+fold0_model.joblib ... fold4_model.joblib
+alldata_model.joblib
+ROC_curve_train_cv_better_{classifier}.pdf
+ROC_curve_internal_test_final_{classifier}.pdf
+```
+
+Resume behavior: if a setting has all expected artifacts and `summary.json` contains the current `feature_selection_scope`, the script reuses saved selected features, best params, models, predictions, and metrics instead of rerunning. If the scope is missing or different, the setting is treated as stale and rerun.
+
+CV metrics:
+
+```text
+together: pooled OOF predictions with one shared threshold
+mean: fold-level metrics averaged across folds
+better: whichever of together/mean has higher AUC
+```
+
+Internal test metrics:
+
+```text
+mean: average probabilities from the five fold models
+best: pick the fold model with highest internal-test AUC
+alldata: train on all train cases and predict internal test
+final: whichever of mean/best/alldata has highest internal-test AUC
+```
+
+Primary reported metrics remain AUC, accuracy, sensitivity, and specificity. `summarize.py` in both `whole_image` and `habitats` writes full and compact sheets, where compact sheets contain only setting identity plus CV selected mode/CV better metrics and test final selected method/test final metrics.
+
+## Detailed 2026-06 ML Redesign Memory
+
+For the complete conversation-derived record of the new train/internal-test ML design, feature-selection decision, resume behavior, `main.sh` control variables, and summary format, see:
+
+```text
+references/ml_redesign_2026_06.md
+```
