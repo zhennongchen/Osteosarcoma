@@ -30,7 +30,7 @@ METRIC_PREFIXES = [
     "test_best",
     "test_alldata",
 ]
-METRICS = ["auc", "accuracy", "sensitivity", "specificity"]
+METRICS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 BASE_COLUMNS = [
     "experiment",
     "status",
@@ -73,12 +73,22 @@ COMPACT_COLUMNS = [
     "feature_selection_scope",
     "selected_feature_count",
     "cv_selected_metric_mode",
+    "cv_together_auc",
+    "cv_together_auc_ci_low",
+    "cv_together_auc_ci_high",
+    "cv_together_accuracy",
+    "cv_together_sensitivity",
+    "cv_together_specificity",
     "cv_better_auc",
+    "cv_better_auc_ci_low",
+    "cv_better_auc_ci_high",
     "cv_better_accuracy",
     "cv_better_sensitivity",
     "cv_better_specificity",
     "test_final_selected_method",
     "test_final_auc",
+    "test_final_auc_ci_low",
+    "test_final_auc_ci_high",
     "test_final_accuracy",
     "test_final_sensitivity",
     "test_final_specificity",

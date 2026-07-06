@@ -145,6 +145,144 @@ habitats_zoomed = zoom(habitats_down, zoom=zoom_factors, order=0).astype(np.uint
 
 Crop/pad from origin to exactly match the feature-map shape, then restrict to `foreground_111` and save `habitats_space111.nii.gz`.
 
+## Step 2 Alternative: Paper-Style Cohort-Level K Selection - 2026-06-15
+
+This is the current new direction for choosing habitat number, motivated by the paper `MRI-based habitat radiomics combined with vision transformer for identifying vulnerable intracranial atherosclerotic plaques and predicting stroke events` and its Supplementary Appendix 4 / Figure S1.
+
+The previous individual-K workflow remains documented above and its completed experiments are considered the `habitats_individual` branch of results. The new paper-style approach separates K selection from habitat generation:
+
+1. Normalize each case in `[1,1,1]` voxel feature-map foreground using per-case z-score normalization.
+2. Downsample normalized continuous feature maps with `block_reduce(..., func=np.mean)` and `downsample_block_size=(3,3,3)`.
+3. For K selection only, test `K=2..9` for each selected case.
+4. For every case/K, compute both:
+   - silhouette coefficient (`silhouette_score`)
+   - Calinski-Harabasz index (`calinski_harabasz_score`, CH index)
+5. Aggregate case-level scores by K and plot cohort-level mean curves, analogous to the paper's Supplementary Figure S1.
+6. The user manually selects the final K from these SC/CH elbow curves.
+7. Apply the selected fixed K to every case, one by one, generating the same downstream files expected by Step 3.
+
+Current notebook implementation:
+
+```text
+/host/d/Github/Osteosarcoma/habitats/step1_make_habitat.ipynb
+```
+
+Current cell names:
+
+```text
+Step2_alternative: cohort-level K selection curves using silhouette coefficient and CH index
+Step2_fixedK_apply_to_all_cases: apply manually selected K to every case
+```
+
+### Step2_alternative Current Behavior
+
+The K-selection cell defaults to the first 100 cases because exact SC is slow:
+
+```python
+K_candidates_alt = list(range(2, 10))
+max_cases_for_k_selection = 100
+silhouette_sample_size = None
+```
+
+`silhouette_sample_size = None` means exact silhouette coefficient. It can be changed to an integer, such as `10000`, for approximate/faster curves.
+
+The K-selection cell is resumable. It reads existing `case_level_K2_K9_silhouette_CH_scores.xlsx`, builds a completed `(Patient_set, Patient_index, K)` cache, and skips already-computed case/K rows. If the user later changes `max_cases_for_k_selection` from 100 to 150, the cell should only compute the newly needed rows.
+
+Outputs are saved directly under:
+
+```text
+/host/d/projects/Habitats/radiomics/habitats
+```
+
+Files:
+
+```text
+case_level_K2_K9_silhouette_CH_scores.xlsx
+cohort_mean_K2_K9_silhouette_CH_scores.xlsx
+cohort_mean_silhouette_K2_K9.png
+cohort_mean_CH_K2_K9.png
+```
+
+Do not create a separate `step2_alternative_K2_K9` output folder.
+
+### Step2_fixedK_apply_to_all_cases Current Behavior
+
+After manual inspection of the two K curves, set:
+
+```python
+fixed_K = 3
+```
+
+The value is currently a placeholder and is meant to be edited by the user after checking the plots.
+
+This fixed-K cell applies the same K to all cases and saves per-case outputs in the existing case folders:
+
+```text
+/host/d/projects/Habitats/radiomics/habitats/{Patient_set}/{Patient_index}/
+```
+
+Per case it saves/overwrites the downstream-compatible files:
+
+```text
+normalization_parameters_111.xlsx
+habitats_downsampled.nii.gz
+habitats_space111.nii.gz
+best_K_summary_downsampled.xlsx
+```
+
+`best_K_summary_downsampled.xlsx` records:
+
+```text
+best_K = fixed_K
+K_selection_method = fixed_cohort_level_elbow
+```
+
+The fixed-K cell has resume behavior:
+
+```python
+skip_existing_same_K = True
+```
+
+If `habitats_downsampled.nii.gz`, `habitats_space111.nii.gz`, and `best_K_summary_downsampled.xlsx` already exist and the summary has the same `best_K` plus `K_selection_method == "fixed_cohort_level_elbow"`, that case is skipped. If the fixed K changes, the case will be regenerated.
+
+Important: the fixed-K block currently stops after generating the same Step 2 outputs as the previous workflow. Existing Step 3 back-projection and later radiomics extraction cells should then be run as before.
+
+## Habitat Branch Naming - 2026-06-18
+
+Current habitat branches are now:
+
+- `habitat_avg` / `habitats_avg`:
+  - fixed `K` for all cases
+  - radiomics tables still live under the shared radiomics habitat root:
+    `/host/d/projects/Habitats/radiomics/habitats/`
+  - model outputs live under:
+    `/host/d/projects/Habitats/models/{Task}/habitats_avg/`
+  - feature-selection tables live under:
+    `/host/d/projects/Habitats/radiomics/habitats/select_avg/`
+
+- `habitat_sum` / `habitats_sum`:
+  - fixed `K` for all cases
+  - radiomics tables still live under the shared radiomics habitat root:
+    `/host/d/projects/Habitats/radiomics/habitats/`
+  - model outputs live under:
+    `/host/d/projects/Habitats/models/{Task}/habitats_sum/`
+  - feature-selection tables live under:
+    `/host/d/projects/Habitats/radiomics/habitats/select_sum/`
+
+- `habitat_individual` / `habitats_individual`:
+  - old branch where each case had its own specific `K`
+  - this name refers to the previous per-case-K workflow in both radiomics/model result interpretation
+
+Important naming note:
+
+- radiomics outputs for the fixed-K branches still stay inside the shared habitat radiomics folder and are differentiated by filenames such as `habitat_radiomics_measurements_avg*.xlsx` and `habitat_radiomics_measurements_sum*.xlsx`
+- model outputs are separated by `IMAGE_TYPE`:
+  - `habitats_avg`
+  - `habitats_sum`
+- selected-feature tables are separated by folder rather than filename suffix:
+  - `select_avg/`
+  - `select_sum/`
+
 ## Step 3: Back-Project Habitat Masks to Original Image Space
 
 Notebook section: `step 3: put habitat mask into original image space`.
@@ -712,3 +850,7 @@ For the complete conversation-derived record of the new train/internal-test ML d
 ```text
 references/ml_redesign_2026_06.md
 ```
+
+## Result Memories
+
+- Prognosis habitat strategy comparison completed on 2026-06-23: see `references/habitat_results_2026_06_23.md`.

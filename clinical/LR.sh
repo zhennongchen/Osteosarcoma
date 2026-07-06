@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_SCRIPT="${SCRIPT_DIR}/LR.py"
+TASK="${TASK:-Prognosis}"
+RANDOM_STATE_LIST="${RANDOM_STATE_LIST:-0 10 20 30 40}"
+SELECTOR_LIST="${SELECTOR_LIST:-none lasso rfecv}"
+
+for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
+  for selector in ${SELECTOR_LIST}; do
+    echo "========== Clinical LR | task=${TASK} | random_state=${RANDOM_STATE} | selector=${selector} | top_k=None =========="
+    python3 "${PYTHON_SCRIPT}" \
+      --classifier LR \
+      --task "${TASK}" \
+      --random_state "${RANDOM_STATE}" \
+      --lr_feature_selector "${selector}" \
+      --top_k None
+  done
+done

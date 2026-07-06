@@ -287,13 +287,23 @@ Compact summary should include only setting identity plus:
 
 ```text
 cv_selected_metric_mode
+cv_together_auc
+cv_together_auc_ci_low
+cv_together_auc_ci_high
+cv_together_accuracy
+cv_together_sensitivity
+cv_together_specificity
 cv_better_auc
+cv_better_auc_ci_low
+cv_better_auc_ci_high
 cv_better_accuracy
 cv_better_sensitivity
 cv_better_specificity
 
 test_final_selected_method
 test_final_auc
+test_final_auc_ci_low
+test_final_auc_ci_high
 test_final_accuracy
 test_final_sensitivity
 test_final_specificity
@@ -328,3 +338,113 @@ The current model scripts also use `n_jobs=1` for grid search, recursive/sequent
 - Keep selectors inside method `.sh` files, not in `main.sh`, because model families differ.
 - `main.sh` should control `METHOD_LIST`, `RANDOM_STATE_LIST`, `TOP_K_LIST`, `TASK`, and `LR_TOP_K_LIST`.
 - When adding DL/fusion later, probability-level fusion and OOF stacking are recorded separately in the `habitat-ensemble-fusion` skill.
+
+## July 2026 Status And Final-Selection Notebooks
+
+By 2026-07-01, the following Prognosis model families had been run or were being finalized:
+
+```text
+whole_image
+habitats_individual
+dl_2d_ml
+dl_2d_ml_cv
+dl_3d_ml
+```
+
+Meanings:
+
+- `whole_image`: whole-tumor radiomics ML.
+- `habitats_individual`: habitat radiomics using the earlier per-case/specific-K habitat workflow.
+- `dl_2d_ml`: exploratory DL-feature ML where the DL feature extractor was trained on all 330 cases before feature extraction. This is intentionally leakage-prone/optimistic.
+- `dl_2d_ml_cv`: more methodologically valid DL-feature ML where fold-specific DL feature extraction is used; expected to perform worse because the DL models themselves overfit.
+- `dl_3d_ml`: 3D DL-feature ML using the same downstream ML framework.
+
+Current summary files are under:
+
+```text
+/host/d/projects/Habitats/models/Prognosis/whole_image/whole_image_model_summary.xlsx
+/host/d/projects/Habitats/models/Prognosis/habitats_individual/habitat_model_summary.xlsx
+/host/d/projects/Habitats/models/Prognosis/dl_2d_ml/dl_2d_ml_model_summary.xlsx
+/host/d/projects/Habitats/models/Prognosis/dl_3d_ml/dl_3d_ml_model_summary.xlsx
+```
+
+The compact summary was updated to include `cv_together_*` columns before `cv_better_*` columns. Rationale: the user wants to judge/report validation primarily by pooled/together CV ROC when manually improving results, while retaining `cv_better` for traceability.
+
+### Final Selection Notebooks
+
+Final-selection notebooks implement manual probability-level fusion after individual experiments have completed:
+
+```text
+/host/d/Github/Osteosarcoma/whole_image/final_selection.ipynb
+/host/d/Github/Osteosarcoma/habitats/final_selection.ipynb
+/host/d/Github/Osteosarcoma/dl_2d_ml/final_selection.ipynb
+/host/d/Github/Osteosarcoma/dl_3d_ml/final_selection.ipynb
+```
+
+For each modality, outputs are saved directly into:
+
+```text
+/host/d/projects/Habitats/models/Prognosis/{IMAGE_TYPE}/final_selections/
+```
+
+No extra `final_selection_name` subfolder is used.
+
+Validation/CV section:
+
+- User manually defines `selected_cv_experiments`.
+- Reads each selected experiment's `cv_predictions.xlsx`.
+- Merges by `Patient_set`, `Patient_index`, and label.
+- Keeps the first selected experiment's `fold` as the reference fold.
+- Saves every experiment's probability column.
+- Computes `prob_mean` as arithmetic mean of selected probabilities.
+- Computes `prob_mix` by exhaustive best fold-wise selection: if there are `n` experiments and five folds, it searches `n^5` fold-to-experiment combinations and keeps only the best-AUC mix.
+- Does not save non-best mix candidates.
+- Saves `cv_final_selection_best_mix.xlsx` to show which experiment was chosen for each fold.
+- Saves CV mean and mix ROC plots as separate PDFs:
+  - `ROC_curve_cv_final_selection_mean.pdf`
+  - `ROC_curve_cv_final_selection_mix.pdf`
+
+The mix search includes a sanity check: when more than two experiments are selected, the full best mix must be at least as good as the best mix restricted to the first two experiments. If not, restart the notebook kernel and rerun all cells, because stale notebook state or alignment problems are likely.
+
+Internal-test section:
+
+- User manually defines `selected_test_experiments` independently from CV.
+- Reads each selected experiment's `test_predictions.xlsx`.
+- Uses each experiment's already chosen `prob_final`.
+- Keeps `final_selected_method` so the output shows whether the source experiment used `mean`, `best`, or `alldata`.
+- Computes only the mean of selected `prob_final` columns.
+- Does not perform fold-wise mix on internal test.
+- Saves `ROC_curve_internal_test_final_selection_mean.pdf`.
+
+## July 2026 Planned Full Redo With New Data
+
+As of 2026-07-01, the user plans to redo everything except radiomics feature extraction for already-processed old cases.
+
+Reason:
+
+- New data have arrived, about 20+ additional cases.
+- These new cases still need basic information and radiomics extraction.
+- After incorporating them, patient splitting will be redesigned.
+
+Planned split design:
+
+```text
+train: used for cross-validation
+internal_test
+external_test
+```
+
+Important upcoming change:
+
+- `external_test` will be constructed from a portion of the previous train data plus the new cases.
+- The exact split rule is not fixed yet; wait for user instructions before coding.
+- Existing two-way split logic (`train` plus `internal test`, fold 5 as internal test) should be treated as historical. Future scripts will need explicit external-test support.
+
+When adapting old scripts for the redo, preserve these proven design patterns unless the user changes them:
+
+- keep setting-level artifacts (`summary.json`, predictions, metrics, models, ROC plots);
+- keep resume/skip behavior for completed settings;
+- keep AUC 95% CI columns separate from AUC columns;
+- keep `cv_together`, `cv_better`, and internal-test final metrics separately;
+- keep manual `final_selection.ipynb` style for probability fusion.
+

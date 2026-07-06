@@ -40,11 +40,10 @@ SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
     "image_label_info_set12_5fold_{task_lower}_random{random_state}.xlsx"
 )
-PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/habitats/habitat_radiomics_measurements_avg_PCC.xlsx"
+DEFAULT_PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/habitats_individual/habitat_radiomics_measurements_avg_PCC.xlsx"
 RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats"
-SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats/select"
 MODEL_ROOT = "/host/d/projects/Habitats/models"
-IMAGE_TYPE = "habitats"
+DEFAULT_IMAGE_TYPE = "habitats_individual"
 CLASSIFIER_ARG = "KNN"
 CLASSIFIER_NAME = "KNN"
 CLASSIFIER_DIR = "KNN"
@@ -52,7 +51,7 @@ MODEL_LABEL = "KNN"
 SELECTOR_ARG = "knn_feature_selector"
 DEFAULT_SELECTOR = "sfs"
 SELECTED_PREFIX = "habitat_radiomics_measurements"
-METRIC_KEYS = ["auc", "accuracy", "sensitivity", "specificity"]
+METRIC_KEYS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 FEATURE_SELECTION_SCOPE = "all_330_train_plus_internal_test"
 
 
@@ -66,13 +65,13 @@ def parse_top_k(value):
     if value is None:
         return None
     if isinstance(value, str) and value.lower() == "none":
-        if False:
+        if True:
             return None
         raise argparse.ArgumentTypeError("top_k cannot be None for this classifier")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError("top_k must be an integer" + (" or None" if False else "")) from exc
+        raise argparse.ArgumentTypeError("top_k must be an integer" + (" or None" if True else "")) from exc
 
 
 def top_k_label(top_k):
@@ -82,12 +81,14 @@ def top_k_label(top_k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run habitat weighted-average radiomics KNN experiments.")
+    parser = argparse.ArgumentParser(description="Run habitat radiomics experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
+    parser.add_argument("--pcc_radiomics_path", default=DEFAULT_PCC_RADIOMICS_PATH)
+    parser.add_argument("--image_type", choices=["habitats_individual", "habitats_avg", "habitats_sum"], default=DEFAULT_IMAGE_TYPE)
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
-    parser.add_argument("--knn_feature_selector", choices=['sfs'], default=DEFAULT_SELECTOR)
-    parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Ignored for RFECV.")
+    parser.add_argument("--knn_feature_selector", choices=['sfs', 'lasso'], default=DEFAULT_SELECTOR)
+    parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Use None to keep all non-zero LASSO features.")
     return parser.parse_args()
 
 
@@ -95,8 +96,18 @@ def get_label_col(task):
     return TASK_TO_LABEL_COL[task]
 
 
-def get_model_out_dir(task):
-    return os.path.join(MODEL_ROOT, task, IMAGE_TYPE)
+def get_model_out_dir(task, image_type):
+    return os.path.join(MODEL_ROOT, task, image_type)
+
+
+def get_select_out_dir(image_type):
+    if image_type == "habitats_individual":
+        return "/host/d/projects/Habitats/radiomics/habitats_individual/select"
+    if image_type == "habitats_avg":
+        return "/host/d/projects/Habitats/radiomics/habitats/select_avg"
+    if image_type == "habitats_sum":
+        return "/host/d/projects/Habitats/radiomics/habitats/select_sum"
+    raise ValueError(f"Unsupported image_type for select dir: {image_type}")
 
 
 def load_patient_split(random_state, task):
@@ -211,6 +222,8 @@ def select_lasso_features(top_k, feature_cols, X, y, random_state):
     nonzero_sorted_idx = nonzero_idx[np.argsort(abs_coef[nonzero_idx])[::-1]]
     if top_k is None:
         selected_idx = nonzero_sorted_idx
+        if len(selected_idx) == 0:
+            raise SkipExperiment("LASSO selected 0 non-zero features with top_k=None.")
         if len(selected_idx) > LASSO_MAX_FEATURES:
             raise SkipExperiment(f"LASSO selected {len(selected_idx)} non-zero features, which exceeds the hard limit of {LASSO_MAX_FEATURES}.")
     elif len(nonzero_sorted_idx) >= top_k:
@@ -223,9 +236,7 @@ def select_lasso_features(top_k, feature_cols, X, y, random_state):
 
 
 def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
-    if CLASSIFIER_ARG == "LR":
-        if feature_selector != "lasso":
-            raise ValueError(f"Unsupported LR feature selector: {feature_selector}")
+    if feature_selector == "lasso":
         return select_lasso_features(top_k, feature_cols, X, y, random_state)
 
     cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=random_state)
@@ -245,29 +256,31 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
     return selected_features
 
 
-def get_selected_feature_path(task, random_state, feature_selector, top_k):
+def get_selected_feature_path(task, random_state, feature_selector, top_k, image_type):
     suffix = f"{task}_random{random_state}_{feature_selector}"
     if feature_selector in {"rfe", "sfs"}:
         suffix += f"_top{top_k}"
     elif feature_selector == "lasso":
         suffix += f"_{top_k_label(top_k)}"
-    return os.path.join(SELECT_OUT_DIR, f"{SELECTED_PREFIX}_{CLASSIFIER_ARG}_{suffix}_selected.xlsx")
+    select_dir = get_select_out_dir(image_type)
+    os.makedirs(select_dir, exist_ok=True)
+    selector_file_classifier = "LR" if feature_selector == "lasso" else CLASSIFIER_ARG
+    return os.path.join(select_dir, f"{SELECTED_PREFIX}_{selector_file_classifier}_{suffix}_selected.xlsx")
 
 
 def get_feature_cols_from_selected_table(selected_df):
     return [c for c in selected_df.columns if c not in NON_FEATURE_COLS]
 
 
-def save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k):
-    os.makedirs(SELECT_OUT_DIR, exist_ok=True)
-    selected_out_path = get_selected_feature_path(task, random_state, feature_selector, top_k)
+def save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k, image_type):
+    selected_out_path = get_selected_feature_path(task, random_state, feature_selector, top_k, image_type)
     radiomics_df[NON_FEATURE_COLS + selected_features].copy().to_excel(selected_out_path, index=False)
     print("Saved selected feature table:", selected_out_path)
     return selected_out_path
 
 
-def load_or_select_features(radiomics_df, feature_selector, top_k, feature_cols, X_all, y_all, task, random_state):
-    selected_path = get_selected_feature_path(task, random_state, feature_selector, top_k)
+def load_or_select_features(radiomics_df, feature_selector, top_k, feature_cols, X_all, y_all, task, random_state, image_type):
+    selected_path = get_selected_feature_path(task, random_state, feature_selector, top_k, image_type)
     if os.path.exists(selected_path):
         selected_df = pd.read_excel(selected_path)
         selected_features = get_feature_cols_from_selected_table(selected_df)
@@ -277,7 +290,7 @@ def load_or_select_features(radiomics_df, feature_selector, top_k, feature_cols,
             return selected_path, selected_features
         print("Existing selected feature table has no feature columns; regenerating:", selected_path)
     selected_features = select_features(feature_selector, top_k, feature_cols, X_all, y_all, random_state)
-    selected_path = save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k)
+    selected_path = save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k, image_type)
     return selected_path, selected_features
 
 
@@ -287,10 +300,47 @@ def safe_auc(y_true, y_score):
     return float(roc_auc_score(y_true, y_score))
 
 
+def bootstrap_auc_ci(y_true, y_score, n_bootstrap=2000, ci=0.95, random_state=0):
+    y_true = np.asarray(y_true).astype(int)
+    y_score = np.asarray(y_score).astype(float)
+    if len(y_true) == 0 or len(np.unique(y_true)) < 2:
+        return float("nan"), float("nan")
+    rng = np.random.default_rng(random_state)
+    auc_values = []
+    n = len(y_true)
+    for _ in range(n_bootstrap):
+        sample_idx = rng.integers(0, n, size=n)
+        if len(np.unique(y_true[sample_idx])) < 2:
+            continue
+        auc_values.append(roc_auc_score(y_true[sample_idx], y_score[sample_idx]))
+    if not auc_values:
+        return float("nan"), float("nan")
+    alpha = (1.0 - ci) / 2.0
+    low, high = np.percentile(auc_values, [100 * alpha, 100 * (1.0 - alpha)])
+    return float(low), float(high)
+
+
+def bootstrap_mean_ci(values, n_bootstrap=2000, ci=0.95, random_state=0):
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if len(values) == 0:
+        return float("nan"), float("nan")
+    rng = np.random.default_rng(random_state)
+    boot_means = []
+    n = len(values)
+    for _ in range(n_bootstrap):
+        sample_idx = rng.integers(0, n, size=n)
+        boot_means.append(float(np.mean(values[sample_idx])))
+    alpha = (1.0 - ci) / 2.0
+    low, high = np.percentile(boot_means, [100 * alpha, 100 * (1.0 - alpha)])
+    return float(low), float(high)
+
+
 def binary_metrics(y_true, y_score):
     y_true = np.asarray(y_true).astype(int)
     y_score = np.asarray(y_score).astype(float)
     auc_value = safe_auc(y_true, y_score)
+    auc_ci_low, auc_ci_high = bootstrap_auc_ci(y_true, y_score)
     if len(np.unique(y_true)) < 2:
         threshold = 0.5
     else:
@@ -309,6 +359,8 @@ def binary_metrics(y_true, y_score):
     fn = int(np.sum((y_true == 1) & (y_pred == 0)))
     return {
         "auc": auc_value,
+        "auc_ci_low": auc_ci_low,
+        "auc_ci_high": auc_ci_high,
         "accuracy": float((tp + tn) / len(y_true)) if len(y_true) > 0 else float("nan"),
         "sensitivity": float(tp / (tp + fn)) if (tp + fn) > 0 else float("nan"),
         "specificity": float(tn / (tn + fp)) if (tn + fp) > 0 else float("nan"),
@@ -436,16 +488,16 @@ def metrics_row(name, metrics, extra=None):
     row = {"name": name}
     if extra:
         row.update(extra)
-    for key in ["auc", "accuracy", "sensitivity", "specificity", "threshold", "tp", "fp", "tn", "fn"]:
+    for key in ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity", "threshold", "tp", "fp", "tn", "fn"]:
         row[key] = metrics.get(key, "")
     return row
 
 
 def run_experiment(args, labels_df, split_path):
     feature_selector = getattr(args, SELECTOR_ARG)
-    radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(PCC_RADIOMICS_PATH, labels_df)
+    radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(args.pcc_radiomics_path, labels_df)
     experiment_name = get_experiment_name(args.random_state, feature_selector, args.top_k)
-    out_dir = os.path.join(get_model_out_dir(args.task), CLASSIFIER_DIR, experiment_name)
+    out_dir = os.path.join(get_model_out_dir(args.task, args.image_type), CLASSIFIER_DIR, experiment_name)
     os.makedirs(out_dir, exist_ok=True)
     if completed_experiment_exists(out_dir):
         print_completed_summary(out_dir)
@@ -467,6 +519,7 @@ def run_experiment(args, labels_df, split_path):
             y_all=y,
             task=args.task,
             random_state=args.random_state,
+            image_type=args.image_type,
         )
     except SkipExperiment as exc:
         write_skip_file(out_dir, args, feature_selector, exc.reason)
@@ -498,6 +551,8 @@ def run_experiment(args, labels_df, split_path):
         "best_params": best_params,
         "best_gridsearch_auc": best_auc_cv,
         "feature_selection_scope": FEATURE_SELECTION_SCOPE,
+        "image_type": args.image_type,
+        "pcc_radiomics_path": args.pcc_radiomics_path,
     }
     with open(os.path.join(out_dir, "best_params.json"), "w") as f:
         json.dump(best_info, f, indent=4)
@@ -531,6 +586,9 @@ def run_experiment(args, labels_df, split_path):
     y_cv_prob = cv_pred_df["pred_prob"].values
     cv_together_metrics = binary_metrics(y_cv_true, y_cv_prob)
     cv_mean_metrics = {key: float(cv_fold_metrics_df[key].mean()) for key in METRIC_KEYS}
+    cv_mean_auc_ci_low, cv_mean_auc_ci_high = bootstrap_mean_ci(cv_fold_metrics_df["auc"].values)
+    cv_mean_metrics["auc_ci_low"] = cv_mean_auc_ci_low
+    cv_mean_metrics["auc_ci_high"] = cv_mean_auc_ci_high
     cv_mean_metrics["threshold"] = float(cv_fold_metrics_df["threshold"].mean())
     if cv_together_metrics["auc"] >= cv_mean_metrics["auc"]:
         cv_selected_metric_mode = "together"; cv_better_metrics = cv_together_metrics

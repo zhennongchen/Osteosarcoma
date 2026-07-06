@@ -14,7 +14,7 @@ import pandas as pd
 
 DEFAULT_TASK = "Prognosis"
 MODEL_ROOT = Path("/host/d/projects/Habitats/models")
-IMAGE_TYPE = "habitats"
+DEFAULT_IMAGE_TYPE = "habitats_individual"
 DEFAULT_OUTPUT_NAME = "habitat_model_summary.xlsx"
 PREFERRED_CLASSIFIER_ORDER = ["SVM", "LR", "XGBoost", "RandomForest", "KNN"]
 EXPERIMENT_RE = re.compile(
@@ -30,13 +30,14 @@ METRIC_PREFIXES = [
     "test_best",
     "test_alldata",
 ]
-METRICS = ["auc", "accuracy", "sensitivity", "specificity"]
+METRICS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 BASE_COLUMNS = [
     "experiment",
     "status",
     "classifier",
     "model",
     "task",
+    "image_type",
     "random_state",
     "feature_selector",
     "top_k",
@@ -73,12 +74,22 @@ COMPACT_COLUMNS = [
     "feature_selection_scope",
     "selected_feature_count",
     "cv_selected_metric_mode",
+    "cv_together_auc",
+    "cv_together_auc_ci_low",
+    "cv_together_auc_ci_high",
+    "cv_together_accuracy",
+    "cv_together_sensitivity",
+    "cv_together_specificity",
     "cv_better_auc",
+    "cv_better_auc_ci_low",
+    "cv_better_auc_ci_high",
     "cv_better_accuracy",
     "cv_better_sensitivity",
     "cv_better_specificity",
     "test_final_selected_method",
     "test_final_auc",
+    "test_final_auc_ci_low",
+    "test_final_auc_ci_high",
     "test_final_accuracy",
     "test_final_sensitivity",
     "test_final_specificity",
@@ -86,13 +97,14 @@ COMPACT_COLUMNS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create Excel summaries for habitat weighted-average ML experiments.")
+    parser = argparse.ArgumentParser(description="Create Excel summaries for habitat ML experiments.")
     parser.add_argument("--task", choices=["Prognosis", "Pathologic"], default=DEFAULT_TASK)
+    parser.add_argument("--image_type", choices=["habitats_individual", "habitats_avg", "habitats_sum"], default=DEFAULT_IMAGE_TYPE)
     parser.add_argument(
         "--models_root",
         type=Path,
         default=None,
-        help=f"Root folder containing one subfolder per classifier. Default: /host/d/projects/Habitats/models/{{task}}/{IMAGE_TYPE}.",
+        help="Root folder containing one subfolder per classifier. Default: /host/d/projects/Habitats/models/{task}/{image_type}.",
     )
     parser.add_argument(
         "--out_path",
@@ -315,7 +327,7 @@ def write_sheet(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) -> No
 
 def main() -> None:
     args = parse_args()
-    models_root = args.models_root or (MODEL_ROOT / args.task / IMAGE_TYPE)
+    models_root = args.models_root or (MODEL_ROOT / args.task / args.image_type)
     out_path = args.out_path or (models_root / DEFAULT_OUTPUT_NAME)
     if not models_root.exists():
         raise FileNotFoundError(f"Models root does not exist: {models_root}")

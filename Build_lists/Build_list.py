@@ -4,7 +4,7 @@ import os
 import pandas as pd
 
 
-class Build():  
+class Build():   
     def __init__(self,file_list):
         self.file_list = file_list
         self.data = pd.read_excel(file_list, dtype = {'Patient_index': str})
@@ -12,12 +12,12 @@ class Build():
         # if 'Include' in self.data.columns:
         #     self.data = self.data[self.data['Include'] == 'Yes'].reset_index(drop=True)
 
-    def __build__(self,batch_list = None, index_list = None):
+    def __build__(self,batch_list = None, index_list = None,label_column_name = 'Prognosis_label'):
         # assert batch_list and index list are not both None or both not None
 
         if index_list is None and batch_list is not None:
             for b in range(len(batch_list)):
-                cases = self.data.loc[self.data['batch'] == batch_list[b]]
+                cases = self.data.loc[self.data['fold'] == batch_list[b]]
                 if b == 0:
                     c = cases.copy()
                 else:
@@ -27,12 +27,12 @@ class Build():
         elif batch_list is None and index_list is None:
             c = self.data
 
-        batch_list = np.asarray(c['batch']) if 'batch' in c.columns else None
+        fold_list = np.asarray(c['fold']) if 'fold' in c.columns else None
         patient_set_list = np.asarray(c['Patient_set']) if 'Patient_set' in c.columns else None
         patient_index_list = np.asarray(c['Patient_index']) if 'Patient_index' in c.columns else None
-        label_list = np.asarray(c['Prognosis_label']) if 'Prognosis_label' in c.columns else None
+        label_list = np.asarray(c[label_column_name]) if label_column_name in c.columns else None
         image_path_list = np.asarray(c['Image_filepath']) if 'Image_filepath' in c.columns else None
         mask_path_list = np.asarray(c['Mask_filepath']) if 'Mask_filepath' in c.columns else None
 
-        return batch_list, patient_set_list, patient_index_list, label_list, image_path_list, mask_path_list
+        return fold_list, patient_set_list, patient_index_list, label_list, image_path_list, mask_path_list
       

@@ -62,3 +62,21 @@ Whole-image scripts are in `/host/d/Github/Osteosarcoma/whole_image`: `LR.py`, `
 Habitat ML scripts now support two tasks through `--task Prognosis` or `--task Pathologic`. `TASK_TO_LABEL_COL` maps `Prognosis` to `Prognosis_label` and `Pathologic` to `Pathologic_label`. Shell scripts have `TASK="Prognosis"` at the top; change it to `Pathologic` to run that task.
 
 Task controls the label column, split file name, selected-feature filename, and model output root. Habitat model outputs now go under `/host/d/projects/Habitats/models/{TASK}/habitats/`, while selected-feature tables stay under `/host/d/projects/Habitats/radiomics/habitats/` but include the task name in the filename. `habitats/summarize.py` also accepts `--task` and summarizes `/models/{TASK}/habitats` by default.
+
+## 2026-06-15 New K Selection Direction
+
+The project now has a paper-style alternative for selecting habitat number, based on the intracranial plaque Habitat + ViT paper Supplementary Appendix 4 / Figure S1. The old per-case SC-max workflow is now treated as the `habitats_individual` result branch. The new approach is:
+
+1. Run `Step2_alternative` in `habitats/step1_make_habitat.ipynb`.
+2. For each selected case, normalize foreground voxel features per case, downsample normalized feature maps with block mean, test K=2..9, and compute both silhouette coefficient and Calinski-Harabasz index.
+3. Save case-level cached scores to `/host/d/projects/Habitats/radiomics/habitats/case_level_K2_K9_silhouette_CH_scores.xlsx`.
+4. Save cohort mean scores and plots directly under `/host/d/projects/Habitats/radiomics/habitats`:
+   - `cohort_mean_K2_K9_silhouette_CH_scores.xlsx`
+   - `cohort_mean_silhouette_K2_K9.png`
+   - `cohort_mean_CH_K2_K9.png`
+5. Current default is `max_cases_for_k_selection = 100`, with resumable case/K caching. Increasing this number later should only compute missing case/K rows.
+6. After the user manually chooses final K from the SC/CH elbow curves, run `Step2_fixedK_apply_to_all_cases` with `fixed_K = <chosen K>`.
+7. The fixed-K block applies one K to all cases and saves the downstream-compatible Step 2 outputs per case: `normalization_parameters_111.xlsx`, `habitats_downsampled.nii.gz`, `habitats_space111.nii.gz`, and `best_K_summary_downsampled.xlsx`.
+8. Fixed-K summaries record `K_selection_method = fixed_cohort_level_elbow`; same-K completed cases are skipped when `skip_existing_same_K = True`.
+
+After fixed-K Step 2, run the existing Step 3 back-projection and later radiomics extraction cells as before.
