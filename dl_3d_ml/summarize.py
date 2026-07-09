@@ -23,13 +23,18 @@ EXPERIMENT_RE = re.compile(
     re.IGNORECASE,
 )
 METRIC_PREFIXES = [
-    "cv_better",
+    "cv_final",
+    "cv_final_advanced",
     "cv_together",
-    "cv_mean",
-    "test_final",
-    "test_mean",
-    "test_best",
-    "test_alldata",
+    "cv_allotherdata",
+    "internal_test_final",
+    "internal_test_mean",
+    "internal_test_best",
+    "internal_test_alldata",
+    "external_test_final",
+    "external_test_mean",
+    "external_test_best",
+    "external_test_alldata",
 ]
 METRICS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 BASE_COLUMNS = [
@@ -44,12 +49,17 @@ BASE_COLUMNS = [
     "feature_selection_scope",
     "selected_feature_count",
     "best_gridsearch_auc",
+    "gridsearch_range",
+    "gridsearch_size",
     "best_params",
     "train_size",
     "internal_test_size",
-    "cv_selected_metric_mode",
-    "test_final_selected_method",
-    "test_best_selected_model_fold",
+    "external_test_size",
+    "cv_final_selected_method",
+    "internal_test_final_selected_method",
+    "internal_test_best_selected_model_fold",
+    "external_test_final_selected_method",
+    "external_test_best_selected_model_fold",
 ]
 FULL_COLUMNS = [
     *BASE_COLUMNS,
@@ -57,9 +67,16 @@ FULL_COLUMNS = [
     "skip_reason",
     "selected_feature_table",
     "cv_predictions",
-    "test_predictions",
-    "cv_better_roc",
-    "test_final_roc",
+    "cv_final_advanced_fold_selection",
+    "cv_final_advanced_combination_search",
+    "internal_test_predictions",
+    "external_test_predictions",
+    "cv_together_roc",
+    "cv_allotherdata_roc",
+    "cv_final_roc",
+    "cv_final_advanced_roc",
+    "internal_test_final_roc",
+    "external_test_final_roc",
     "alldata_model_path",
     "split_file",
 ]
@@ -73,38 +90,45 @@ COMPACT_COLUMNS = [
     "top_k",
     "feature_selection_scope",
     "selected_feature_count",
-    "cv_selected_metric_mode",
-    "cv_together_auc",
-    "cv_together_auc_ci_low",
-    "cv_together_auc_ci_high",
-    "cv_together_accuracy",
-    "cv_together_sensitivity",
-    "cv_together_specificity",
-    "cv_better_auc",
-    "cv_better_auc_ci_low",
-    "cv_better_auc_ci_high",
-    "cv_better_accuracy",
-    "cv_better_sensitivity",
-    "cv_better_specificity",
-    "test_final_selected_method",
-    "test_final_auc",
-    "test_final_auc_ci_low",
-    "test_final_auc_ci_high",
-    "test_final_accuracy",
-    "test_final_sensitivity",
-    "test_final_specificity",
+    "cv_final_selected_method",
+    "cv_final_auc",
+    "cv_final_auc_ci_low",
+    "cv_final_auc_ci_high",
+    "cv_final_accuracy",
+    "cv_final_sensitivity",
+    "cv_final_specificity",
+    "cv_final_advanced_auc",
+    "cv_final_advanced_auc_ci_low",
+    "cv_final_advanced_auc_ci_high",
+    "cv_final_advanced_accuracy",
+    "cv_final_advanced_sensitivity",
+    "cv_final_advanced_specificity",
+    "internal_test_final_selected_method",
+    "internal_test_final_auc",
+    "internal_test_final_auc_ci_low",
+    "internal_test_final_auc_ci_high",
+    "internal_test_final_accuracy",
+    "internal_test_final_sensitivity",
+    "internal_test_final_specificity",
+    "external_test_final_selected_method",
+    "external_test_final_auc",
+    "external_test_final_auc_ci_low",
+    "external_test_final_auc_ci_high",
+    "external_test_final_accuracy",
+    "external_test_final_sensitivity",
+    "external_test_final_specificity",
 ]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create Excel summaries for DL 3D feature ML experiments.")
     parser.add_argument("--task", choices=["Prognosis", "Pathologic"], default=DEFAULT_TASK)
-    parser.add_argument("--trial_name", default=DEFAULT_TRIAL_NAME, help="Model/radiomics trial folder name, e.g. dl_3d_ml or dl_3d_ml_cv.")
+    parser.add_argument("--trial_name", default=DEFAULT_TRIAL_NAME, help="Model/radiomics trial folder name, e.g. dl_2d_ml, dl_2d_ml_cv, or dl_3d_ml.")
     parser.add_argument(
         "--models_root",
         type=Path,
         default=None,
-        help=f"Root folder containing one subfolder per classifier. Default: /host/d/projects/Habitats/models/{{task}}/{IMAGE_TYPE}.",
+        help=f"Root folder containing one subfolder per classifier. Default: /host/d/projects/Habitats/models/{{task}}/{{trial_name}}.",
     )
     parser.add_argument(
         "--out_path",
@@ -190,18 +214,30 @@ def build_completed_row(classifier_dir: str, experiment_dir: Path, data: dict[st
             "feature_selection_scope": data.get("feature_selection_scope", ""),
             "selected_feature_count": data.get("selected_feature_count", ""),
             "best_gridsearch_auc": data.get("best_gridsearch_auc", ""),
+            "gridsearch_range": data.get("gridsearch_range", ""),
+            "gridsearch_size": data.get("gridsearch_size", ""),
             "best_params": compact_json(read_optional_best_params(experiment_dir, data)),
             "train_size": data.get("train_size", ""),
             "internal_test_size": data.get("internal_test_size", ""),
-            "cv_selected_metric_mode": data.get("cv_selected_metric_mode", ""),
-            "test_final_selected_method": data.get("test_final_selected_method", ""),
-            "test_best_selected_model_fold": data.get("test_best_selected_model_fold", ""),
+            "external_test_size": data.get("external_test_size", ""),
+            "cv_final_selected_method": data.get("cv_final_selected_method", ""),
+            "internal_test_final_selected_method": data.get("internal_test_final_selected_method", ""),
+            "internal_test_best_selected_model_fold": data.get("internal_test_best_selected_model_fold", ""),
+            "external_test_final_selected_method": data.get("external_test_final_selected_method", ""),
+            "external_test_best_selected_model_fold": data.get("external_test_best_selected_model_fold", ""),
             "skip_reason": "",
             "selected_feature_table": data.get("selected_feature_table", ""),
             "cv_predictions": data.get("cv_predictions", ""),
-            "test_predictions": data.get("test_predictions", ""),
-            "cv_better_roc": data.get("cv_better_roc", ""),
-            "test_final_roc": data.get("test_final_roc", ""),
+            "cv_final_advanced_fold_selection": data.get("cv_final_advanced_fold_selection", ""),
+            "cv_final_advanced_combination_search": data.get("cv_final_advanced_combination_search", ""),
+            "internal_test_predictions": data.get("internal_test_predictions", data.get("test_predictions", "")),
+            "external_test_predictions": data.get("external_test_predictions", ""),
+            "cv_together_roc": data.get("cv_together_roc", ""),
+            "cv_allotherdata_roc": data.get("cv_allotherdata_roc", ""),
+            "cv_final_roc": data.get("cv_final_roc", ""),
+            "cv_final_advanced_roc": data.get("cv_final_advanced_roc", ""),
+            "internal_test_final_roc": data.get("internal_test_final_roc", ""),
+            "external_test_final_roc": data.get("external_test_final_roc", ""),
             "alldata_model_path": data.get("alldata_model_path", ""),
             "split_file": data.get("split_file", ""),
         }
@@ -327,8 +363,8 @@ def write_sheet(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) -> No
 
 def main() -> None:
     args = parse_args()
-    models_root = args.models_root or (MODEL_ROOT / args.task / args.trial_name)
-    out_path = args.out_path or (models_root / f"{args.trial_name}_model_summary.xlsx")
+    models_root = args.models_root or (MODEL_ROOT / args.task / IMAGE_TYPE)
+    out_path = args.out_path or (models_root / DEFAULT_OUTPUT_NAME)
     if not models_root.exists():
         raise FileNotFoundError(f"Models root does not exist: {models_root}")
     classifier_dirs = discover_classifier_dirs(models_root)

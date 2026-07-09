@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from itertools import product
 
 import joblib
 import matplotlib
@@ -27,7 +28,9 @@ TASK_TO_LABEL_COL = {
     "Pathologic": "Pathologic_label",
 }
 N_SPLITS = 5
+TRAIN_FOLDS = [0, 1, 2, 3, 4]
 INTERNAL_TEST_FOLD = 5
+EXTERNAL_TEST_FOLD = 6
 LABEL_COL = TASK_TO_LABEL_COL[DEFAULT_TASK]
 NON_FEATURE_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath", "fold", "Label"]
 ID_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath"]
@@ -35,10 +38,10 @@ RFECV_MAX_FEATURES = 35
 LASSO_MAX_FEATURES = 35
 SPLIT_COL = "split"
 FOLD_COL = "fold"
-PATIENT_LIST_PATH = "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set12.xlsx"
+PATIENT_LIST_PATH = "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123.xlsx"
 SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
-    "image_label_info_set12_5fold_{task_lower}_random{random_state}.xlsx"
+    "image_label_info_set123_5fold_{task_lower}_random{random_state}.xlsx"
 )
 PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/dl_3d_ml/dl_3d_features_PCA.xlsx"
 RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_3d_ml"
@@ -54,7 +57,7 @@ SELECTOR_ARG = "xgb_feature_selector"
 DEFAULT_SELECTOR = "rfe"
 SELECTED_PREFIX = "dl_3d_features"
 METRIC_KEYS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
-FEATURE_SELECTION_SCOPE = "all_330_train_plus_internal_test"
+FEATURE_SELECTION_SCOPE = "all_set123_train_internal_external"
 
 
 class SkipExperiment(Exception):
@@ -85,8 +88,9 @@ def top_k_label(top_k):
 def parse_args():
     parser = argparse.ArgumentParser(description="Run DL 3D feature XGBoost experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
-    parser.add_argument("--trial_name", default=DEFAULT_TRIAL_NAME, help="Radiomics/model trial folder name, e.g. dl_3d_ml or dl_3d_ml_cv.")
+    parser.add_argument("--trial_name", default=DEFAULT_TRIAL_NAME, help="Radiomics/model trial folder name, e.g. dl_2d_ml, dl_2d_ml_cv, or dl_3d_ml.")
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
+    parser.add_argument("--gridsearch_range", choices=["train", "all"], default="train", help="Use train data or all data for hyperparameter GridSearchCV.")
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
     parser.add_argument("--xgb_feature_selector", choices=['rfe', 'sfs', 'rfecv', 'lasso'], default=DEFAULT_SELECTOR)
     parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Use None to keep all non-zero LASSO features.")
@@ -109,6 +113,7 @@ def get_model_out_dir(task):
     return os.path.join(MODEL_ROOT, task, IMAGE_TYPE)
 
 
+
 def load_patient_split(random_state, task):
     label_col = get_label_col(task)
     split_path = SPLIT_OUT_PATH_TEMPLATE.format(task_lower=task.lower(), random_state=random_state)
@@ -121,15 +126,27 @@ def load_patient_split(random_state, task):
         raise ValueError(f"Split file is missing required columns: {missing}")
     df[label_col] = df[label_col].astype(int)
     df[FOLD_COL] = df[FOLD_COL].astype(int)
-    train_mask = df[SPLIT_COL].eq("train") & df[FOLD_COL].isin(range(N_SPLITS))
-    test_mask = df[SPLIT_COL].eq("internal test") & df[FOLD_COL].eq(INTERNAL_TEST_FOLD)
-    if train_mask.sum() + test_mask.sum() != len(df):
-        raise ValueError("Rows outside expected train/internal-test split found.")
-    print("Loaded patient split:", split_path)
-    print("Train cases:", int(train_mask.sum()), "Internal test cases:", int(test_mask.sum()))
-    print("Train positive fraction:", f"{df.loc[train_mask, label_col].mean():.4f}", "Internal test positive fraction:", f"{df.loc[test_mask, label_col].mean():.4f}")
-    return df, split_path
 
+    train_mask = df[SPLIT_COL].eq("train") & df[FOLD_COL].isin(TRAIN_FOLDS)
+    internal_test_mask = df[SPLIT_COL].eq("internal test") & df[FOLD_COL].eq(INTERNAL_TEST_FOLD)
+    external_test_mask = df[SPLIT_COL].eq("external test") & df[FOLD_COL].eq(EXTERNAL_TEST_FOLD)
+    accounted = train_mask | internal_test_mask | external_test_mask
+    if int(accounted.sum()) != len(df):
+        bad_rows = df.loc[~accounted, ["Patient_set", "Patient_index", SPLIT_COL, FOLD_COL]].head(10)
+        raise ValueError(f"Rows outside expected train/internal/external split found. Examples:\n{bad_rows}")
+
+    print("Loaded patient split:", split_path)
+    print(
+        "Train cases:", int(train_mask.sum()),
+        "Internal test cases:", int(internal_test_mask.sum()),
+        "External test cases:", int(external_test_mask.sum()),
+    )
+    print(
+        "Train positive fraction:", f"{df.loc[train_mask, label_col].mean():.4f}",
+        "Internal test positive fraction:", f"{df.loc[internal_test_mask, label_col].mean():.4f}",
+        "External test positive fraction:", f"{df.loc[external_test_mask, label_col].mean():.4f}",
+    )
+    return df, split_path
 
 def load_features_and_labels(radiomics_path, labels_df):
     radiomics_df = pd.read_excel(radiomics_path)
@@ -139,20 +156,26 @@ def load_features_and_labels(radiomics_path, labels_df):
         raise ValueError(f"Missing columns in label table: {missing_label_cols}")
     missing_radiomics_cols = [c for c in ["Patient_set", "Patient_index"] if c not in radiomics_df.columns]
     if missing_radiomics_cols:
-        raise ValueError(f"Missing columns in radiomics table: {missing_radiomics_cols}")
+        raise ValueError(f"Missing columns in DL feature table: {missing_radiomics_cols}")
     label_cols = ["Patient_set", "Patient_index", SPLIT_COL, FOLD_COL, LABEL_COL]
 
-    # The DL feature table may keep metadata columns such as fold/Label for
-    # human inspection. Those names overlap with the patient split table and
-    # would become fold_x/fold_y after merge. Drop them before merging; the
-    # authoritative split/fold/label always comes from labels_df.
+    # DL feature tables may keep inspection metadata such as fold/Label.
+    # Drop those before merge; the authoritative split/fold/label always comes from labels_df.
     feature_cols = [c for c in radiomics_df.columns if c not in NON_FEATURE_COLS]
     id_cols_existing = [c for c in ID_COLS if c in radiomics_df.columns]
     radiomics_for_merge = radiomics_df[id_cols_existing + feature_cols].copy()
 
-    merged_df = radiomics_for_merge.merge(labels_df[label_cols], on=["Patient_set", "Patient_index"], how="inner", validate="one_to_one").reset_index(drop=True)
+    merged_df = radiomics_for_merge.merge(
+        labels_df[label_cols],
+        on=["Patient_set", "Patient_index"],
+        how="inner",
+        validate="one_to_one",
+    ).reset_index(drop=True)
     if len(merged_df) != len(radiomics_df) or len(merged_df) != len(labels_df):
-        raise ValueError(f"Radiomics and labels are not a complete one-to-one match: radiomics={len(radiomics_df)}, labels={len(labels_df)}, merged={len(merged_df)}")
+        raise ValueError(
+            f"DL features and labels are not a complete one-to-one match: "
+            f"features={len(radiomics_df)}, labels={len(labels_df)}, merged={len(merged_df)}"
+        )
     X = merged_df[feature_cols].values
     y = merged_df[LABEL_COL].astype(int).values
     folds = merged_df[FOLD_COL].astype(int).values
@@ -396,7 +419,7 @@ def plot_roc_curve(y_true, y_score, title, save_path, figsize=(5, 5)):
     plt.tight_layout(); plt.savefig(save_path); plt.close()
 
 
-def plot_cv_mean_roc(cv_pred_df, title, save_path, figsize=(5, 5)):
+def plot_cv_roc(cv_pred_df, title, save_path, figsize=(5, 5)):
     plt.figure(figsize=figsize)
     plotted = False
     for fold_id in sorted(cv_pred_df[FOLD_COL].unique()):
@@ -429,7 +452,7 @@ def get_experiment_name(random_state, feature_selector, top_k):
 
 def write_skip_file(out_dir, args, feature_selector, reason):
     os.makedirs(out_dir, exist_ok=True)
-    skip_info = {"classifier": CLASSIFIER_NAME, "task": args.task, "label_col": LABEL_COL, "random_state": args.random_state, "trial_name": args.trial_name, "feature_selector": feature_selector, "top_k": None if feature_selector == "rfecv" else args.top_k, "status": "skipped", "reason": reason}
+    skip_info = {"classifier": CLASSIFIER_NAME, "task": args.task, "label_col": LABEL_COL, "trial_name": args.trial_name, "random_state": args.random_state, "feature_selector": feature_selector, "top_k": None if feature_selector == "rfecv" else args.top_k, "status": "skipped", "reason": reason}
     skip_path = os.path.join(out_dir, "SKIPPED.json")
     with open(skip_path, "w") as f:
         json.dump(skip_info, f, indent=4)
@@ -437,11 +460,25 @@ def write_skip_file(out_dir, args, feature_selector, reason):
     print("Saved skip record:", skip_path)
 
 
-def expected_completed_artifacts(out_dir):
-    artifacts = ["summary.json", "best_params.json", "cv_predictions.xlsx", "test_predictions.xlsx", "cv_metrics.xlsx", "cv_fold_metrics.xlsx", "test_metrics.xlsx", "grid_search_results.xlsx", "selected_features.xlsx", "alldata_model.joblib"]
-    artifacts.extend([f"fold{fold_id}_model.joblib" for fold_id in range(N_SPLITS)])
-    return [os.path.join(out_dir, artifact) for artifact in artifacts]
 
+def expected_completed_artifacts(out_dir):
+    artifacts = [
+        "summary.json",
+        "best_params.json",
+        "cv_predictions.xlsx",
+        "cv_metrics.xlsx",
+        "cv_fold_metrics.xlsx",
+        "internal_test_predictions.xlsx",
+        "internal_test_metrics.xlsx",
+        "external_test_predictions.xlsx",
+        "external_test_metrics.xlsx",
+        "grid_search_results.xlsx",
+        "selected_features.xlsx",
+        "alldata_model.joblib",
+    ]
+    artifacts.extend([f"fold{fold_id}_model.joblib" for fold_id in TRAIN_FOLDS])
+    artifacts.extend([f"fold{fold_id}_allotherdata_model.joblib" for fold_id in TRAIN_FOLDS])
+    return [os.path.join(out_dir, artifact) for artifact in artifacts]
 
 def completed_experiment_exists(out_dir):
     if not all(os.path.exists(path) for path in expected_completed_artifacts(out_dir)):
@@ -459,6 +496,7 @@ def load_json_file(path):
         return json.load(f)
 
 
+
 def print_completed_summary(out_dir):
     summary = load_json_file(os.path.join(out_dir, "summary.json"))
     best_info = load_json_file(os.path.join(out_dir, "best_params.json"))
@@ -469,11 +507,12 @@ def print_completed_summary(out_dir):
     print("Selected features:", summary.get("selected_feature_count", ""))
     print("Feature selection scope:", summary.get("feature_selection_scope", ""))
     print("Best params:", best_info.get("best_params", summary.get("best_params", "")))
-    print("CV selected mode:", summary.get("cv_selected_metric_mode", ""))
-    print("CV better AUC:", f"{summary.get('cv_better_auc', float('nan')):.4f}")
-    print("Test final selected method:", summary.get("test_final_selected_method", ""))
-    print("Test final AUC:", f"{summary.get('test_final_auc', float('nan')):.4f}")
-
+    print("CV final selected method:", summary.get("cv_final_selected_method", ""))
+    print("CV final AUC:", f"{summary.get('cv_final_auc', float('nan')):.4f}")
+    print("Internal test final selected method:", summary.get("internal_test_final_selected_method", ""))
+    print("Internal test final AUC:", f"{summary.get('internal_test_final_auc', float('nan')):.4f}")
+    print("External test final selected method:", summary.get("external_test_final_selected_method", ""))
+    print("External test final AUC:", f"{summary.get('external_test_final_auc', float('nan')):.4f}")
 
 def estimator_params_from_best_params(best_params):
     params = {}
@@ -501,6 +540,86 @@ def metrics_row(name, metrics, extra=None):
     return row
 
 
+
+def evaluate_holdout_set(
+    dataset_name,
+    display_name,
+    out_dir,
+    merged_df,
+    X_selected,
+    holdout_idx,
+    alldata_model,
+    alldata_model_path,
+):
+    pred_df = merged_df.loc[holdout_idx, ID_COLS + [SPLIT_COL, FOLD_COL, LABEL_COL]].copy()
+    y_holdout = pred_df[LABEL_COL].astype(int).values
+    method_rows = []
+    fold_metrics = []
+
+    for fold_id in TRAIN_FOLDS:
+        fold_model = joblib.load(os.path.join(out_dir, f"fold{fold_id}_model.joblib"))
+        prob = fold_model.predict_proba(X_selected[holdout_idx])[:, 1]
+        prob_col = f"prob_fold{fold_id}_model"
+        pred_df[prob_col] = prob
+        method_metrics = binary_metrics(y_holdout, prob)
+        fold_metrics.append((fold_id, method_metrics, prob_col))
+        method_rows.append(metrics_row(f"fold{fold_id}_model", method_metrics, extra={"method": "fold_model", "fold_model": fold_id}))
+
+    fold_prob_cols = [f"prob_fold{fold_id}_model" for fold_id in TRAIN_FOLDS]
+    pred_df["prob_mean"] = pred_df[fold_prob_cols].mean(axis=1)
+    mean_metrics = binary_metrics(y_holdout, pred_df["prob_mean"].values)
+    method_rows.append(metrics_row("mean", mean_metrics, extra={"method": "mean"}))
+
+    best_fold_id, best_metrics, best_prob_col = max(fold_metrics, key=lambda item: item[1]["auc"])
+    pred_df["best_model_fold"] = best_fold_id
+    pred_df["prob_best"] = pred_df[best_prob_col]
+    method_rows.append(metrics_row("best", best_metrics, extra={"method": "best", "best_model_fold": best_fold_id}))
+
+    pred_df["prob_alldata"] = alldata_model.predict_proba(X_selected[holdout_idx])[:, 1]
+    alldata_metrics = binary_metrics(y_holdout, pred_df["prob_alldata"].values)
+    method_rows.append(metrics_row("alldata", alldata_metrics, extra={"method": "alldata", "model_path": alldata_model_path}))
+
+    final_selected_method, final_metrics = max(
+        [("mean", mean_metrics), ("best", best_metrics), ("alldata", alldata_metrics)],
+        key=lambda item: item[1]["auc"],
+    )
+    if final_selected_method == "mean":
+        pred_df["prob_final"] = pred_df["prob_mean"]
+    elif final_selected_method == "best":
+        pred_df["prob_final"] = pred_df["prob_best"]
+    else:
+        pred_df["prob_final"] = pred_df["prob_alldata"]
+    pred_df["final_selected_method"] = final_selected_method
+    method_rows.append(metrics_row("final", final_metrics, extra={"method": "final", "selected_method": final_selected_method}))
+
+    pred_path = os.path.join(out_dir, f"{dataset_name}_predictions.xlsx")
+    pred_df = pred_df.sort_values(["Patient_set", "Patient_index"])
+    pred_df.to_excel(pred_path, index=False)
+
+    metrics_path = os.path.join(out_dir, f"{dataset_name}_metrics.xlsx")
+    pd.DataFrame(method_rows).to_excel(metrics_path, index=False)
+
+    final_roc_path = os.path.join(out_dir, f"ROC_curve_{dataset_name}_final_{CLASSIFIER_ARG}.pdf")
+    plot_roc_curve(
+        pred_df[LABEL_COL].astype(int).values,
+        pred_df["prob_final"].values,
+        title=f"{display_name} Final ROC - {CLASSIFIER_ARG}",
+        save_path=final_roc_path,
+    )
+
+    return {
+        "predictions": pred_path,
+        "metrics": metrics_path,
+        "final_roc": final_roc_path,
+        "final_selected_method": final_selected_method,
+        "best_selected_model_fold": int(best_fold_id),
+        "final_metrics": final_metrics,
+        "mean_metrics": mean_metrics,
+        "best_metrics": best_metrics,
+        "alldata_metrics": alldata_metrics,
+    }
+
+
 def run_experiment(args, labels_df, split_path):
     feature_selector = getattr(args, SELECTOR_ARG)
     radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(PCC_RADIOMICS_PATH, labels_df)
@@ -511,10 +630,17 @@ def run_experiment(args, labels_df, split_path):
         print_completed_summary(out_dir)
         return
 
-    train_mask = merged_df[SPLIT_COL].eq("train") & merged_df[FOLD_COL].isin(range(N_SPLITS))
-    test_mask = merged_df[SPLIT_COL].eq("internal test") & merged_df[FOLD_COL].eq(INTERNAL_TEST_FOLD)
+    train_mask = merged_df[SPLIT_COL].eq("train") & merged_df[FOLD_COL].isin(TRAIN_FOLDS)
+    internal_test_mask = merged_df[SPLIT_COL].eq("internal test") & merged_df[FOLD_COL].eq(INTERNAL_TEST_FOLD)
+    external_test_mask = merged_df[SPLIT_COL].eq("external test") & merged_df[FOLD_COL].eq(EXTERNAL_TEST_FOLD)
+    accounted_mask = train_mask | internal_test_mask | external_test_mask
+    if int(accounted_mask.sum()) != len(merged_df):
+        raise ValueError("Merged table contains rows outside expected train/internal/external split.")
+
     train_idx_all = np.where(train_mask.values)[0]
-    test_idx = np.where(test_mask.values)[0]
+    internal_test_idx = np.where(internal_test_mask.values)[0]
+    external_test_idx = np.where(external_test_mask.values)[0]
+    all_idx = np.arange(len(merged_df))
     y_train_full = y[train_idx_all]
 
     try:
@@ -534,30 +660,49 @@ def run_experiment(args, labels_df, split_path):
 
     X_selected = merged_df[selected_features].values
     X_train_selected = X_selected[train_idx_all]
+    if args.gridsearch_range == "train":
+        grid_idx = train_idx_all
+    elif args.gridsearch_range == "all":
+        grid_idx = all_idx
+    else:
+        raise ValueError(f"Unsupported gridsearch_range: {args.gridsearch_range}")
+    X_grid_selected = X_selected[grid_idx]
+    y_grid = y[grid_idx]
     inner_cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=args.random_state)
-    grid = GridSearchCV(estimator=make_estimator(random_state=args.random_state, y_for_weight=y_train_full), param_grid=get_param_grid(), scoring="roc_auc", cv=inner_cv, n_jobs=1, refit=True, verbose=1)
-    grid.fit(X_train_selected, y_train_full)
+    grid = GridSearchCV(
+        estimator=make_estimator(random_state=args.random_state, y_for_weight=y_grid),
+        param_grid=get_param_grid(),
+        scoring="roc_auc",
+        cv=inner_cv,
+        n_jobs=1,
+        refit=True,
+        verbose=1,
+    )
+    grid.fit(X_grid_selected, y_grid)
     best_params = grid.best_params_
     best_auc_cv = float(grid.best_score_)
     print(f"Best {CLASSIFIER_ARG} params:", best_params)
-    print(f"Best mean CV AUC during grid search on train: {best_auc_cv:.4f}")
+    print(f"Best mean CV AUC during grid search on {args.gridsearch_range}: {best_auc_cv:.4f}")
 
     best_info = {
         "classifier": CLASSIFIER_NAME,
         "task": args.task,
+        "trial_name": args.trial_name,
         "label_col": LABEL_COL,
         "feature_selector": feature_selector,
         "top_k": None if feature_selector == "rfecv" else args.top_k,
         "random_state": args.random_state,
-        "trial_name": args.trial_name,
         "split_file": split_path,
         "train_size": int(len(train_idx_all)),
-        "internal_test_size": int(len(test_idx)),
+        "internal_test_size": int(len(internal_test_idx)),
+        "external_test_size": int(len(external_test_idx)),
         "selected_feature_count": int(len(selected_features)),
         "selected_features": selected_features,
         "selected_feature_table": selected_path,
         "best_params": best_params,
         "best_gridsearch_auc": best_auc_cv,
+        "gridsearch_range": args.gridsearch_range,
+        "gridsearch_size": int(len(grid_idx)),
         "feature_selection_scope": FEATURE_SELECTION_SCOPE,
     }
     with open(os.path.join(out_dir, "best_params.json"), "w") as f:
@@ -566,22 +711,113 @@ def run_experiment(args, labels_df, split_path):
     pd.DataFrame({"selected_features": selected_features}).to_excel(os.path.join(out_dir, "selected_features.xlsx"), index=False)
 
     cv_pred_df = merged_df.loc[train_idx_all, ID_COLS + [SPLIT_COL, FOLD_COL, LABEL_COL]].copy()
-    cv_pred_df["pred_prob"] = np.nan
+    cv_pred_df["prob_cv"] = np.nan
+    cv_pred_df["prob_cv_allotherdata"] = np.nan
     cv_fold_rows = []
-    for fold_id in range(N_SPLITS):
+
+    for fold_id in TRAIN_FOLDS:
         val_idx = np.where(train_mask.values & (folds == fold_id))[0]
         fold_train_idx = np.setdiff1d(train_idx_all, val_idx)
+
         fold_model = train_fixed_model(X_selected[fold_train_idx], y[fold_train_idx], args.random_state, best_params)
         fold_model_path = os.path.join(out_dir, f"fold{fold_id}_model.joblib")
         joblib.dump(fold_model, fold_model_path)
         val_prob = fold_model.predict_proba(X_selected[val_idx])[:, 1]
-        cv_pred_df.loc[val_idx, "pred_prob"] = val_prob
+        cv_pred_df.loc[val_idx, "prob_cv"] = val_prob
         fold_metrics = binary_metrics(y[val_idx], val_prob)
-        cv_fold_rows.append(metrics_row(f"fold{fold_id}", fold_metrics, extra={"fold": fold_id, "train_size": int(len(fold_train_idx)), "val_size": int(len(val_idx)), "model_path": fold_model_path, "prob_min": float(val_prob.min()), "prob_max": float(val_prob.max())}))
-        print(f"Fold {fold_id} AUC: {fold_metrics['auc']:.4f}")
+        cv_fold_rows.append(metrics_row(f"fold{fold_id}_cv", fold_metrics, extra={"fold": fold_id, "model_type": "cv", "train_size": int(len(fold_train_idx)), "val_size": int(len(val_idx)), "model_path": fold_model_path, "prob_min": float(val_prob.min()), "prob_max": float(val_prob.max())}))
+        print(f"Fold {fold_id} traditional CV AUC: {fold_metrics['auc']:.4f}")
 
-    if cv_pred_df["pred_prob"].isna().any():
-        raise RuntimeError("Some train rows did not receive OOF predictions.")
+        allother_train_idx = np.setdiff1d(all_idx, val_idx)
+        allother_model = train_fixed_model(X_selected[allother_train_idx], y[allother_train_idx], args.random_state, best_params)
+        allother_model_path = os.path.join(out_dir, f"fold{fold_id}_allotherdata_model.joblib")
+        joblib.dump(allother_model, allother_model_path)
+        allother_prob = allother_model.predict_proba(X_selected[val_idx])[:, 1]
+        cv_pred_df.loc[val_idx, "prob_cv_allotherdata"] = allother_prob
+        allother_metrics = binary_metrics(y[val_idx], allother_prob)
+        cv_fold_rows.append(metrics_row(f"fold{fold_id}_allotherdata", allother_metrics, extra={"fold": fold_id, "model_type": "allotherdata", "train_size": int(len(allother_train_idx)), "val_size": int(len(val_idx)), "model_path": allother_model_path, "prob_min": float(allother_prob.min()), "prob_max": float(allother_prob.max())}))
+        print(f"Fold {fold_id} all-other-data CV AUC: {allother_metrics['auc']:.4f}")
+
+    if cv_pred_df[["prob_cv", "prob_cv_allotherdata"]].isna().any().any():
+        raise RuntimeError("Some train rows did not receive CV predictions.")
+
+    cv_pred_df["prob_cv_final_advanced"] = np.nan
+    cv_pred_df["cv_final_advanced_selected_method"] = ""
+
+    # Search every possible fold-wise combination of traditional CV and
+    # all-other-data CV probabilities. With 5 folds this is 2^5 = 32 choices.
+    method_to_prob_col = {
+        "together": "prob_cv",
+        "allotherdata": "prob_cv_allotherdata",
+    }
+    y_cv_search = cv_pred_df[LABEL_COL].astype(int).values
+    combination_rows = []
+    best_combination = None
+    best_combination_auc = -np.inf
+    best_combination_prob = None
+
+    for combination_i, method_tuple in enumerate(product(method_to_prob_col.keys(), repeat=len(TRAIN_FOLDS)), start=1):
+        combination_prob = np.full(len(cv_pred_df), np.nan, dtype=float)
+        combination_record = {
+            "combination_id": combination_i,
+        }
+
+        for fold_id, selected_method in zip(TRAIN_FOLDS, method_tuple):
+            fold_mask = cv_pred_df[FOLD_COL].astype(int).eq(fold_id).values
+            selected_prob_col = method_to_prob_col[selected_method]
+            combination_prob[fold_mask] = cv_pred_df.loc[fold_mask, selected_prob_col].values
+            combination_record[f"fold{fold_id}_selected_method"] = selected_method
+            combination_record[f"fold{fold_id}_selected_probability_column"] = selected_prob_col
+
+        if np.isnan(combination_prob).any():
+            raise RuntimeError("Advanced CV combination search produced missing probabilities.")
+
+        combination_auc = float(roc_auc_score(y_cv_search, combination_prob))
+        combination_record["auc"] = combination_auc
+        combination_rows.append(combination_record)
+
+        if combination_auc > best_combination_auc:
+            best_combination_auc = combination_auc
+            best_combination = method_tuple
+            best_combination_prob = combination_prob.copy()
+
+    if best_combination is None or best_combination_prob is None:
+        raise RuntimeError("Advanced CV combination search did not find a valid combination.")
+
+    cv_pred_df["prob_cv_final_advanced"] = best_combination_prob
+    cv_advanced_rows = []
+    for fold_id, selected_method in zip(TRAIN_FOLDS, best_combination):
+        fold_mask = cv_pred_df[FOLD_COL].astype(int).eq(fold_id)
+        y_fold = cv_pred_df.loc[fold_mask, LABEL_COL].astype(int).values
+        prob_together_fold = cv_pred_df.loc[fold_mask, "prob_cv"].values
+        prob_allother_fold = cv_pred_df.loc[fold_mask, "prob_cv_allotherdata"].values
+        together_fold_metrics = binary_metrics(y_fold, prob_together_fold)
+        allother_fold_metrics = binary_metrics(y_fold, prob_allother_fold)
+        selected_prob_col = method_to_prob_col[selected_method]
+        selected_fold_prob = cv_pred_df.loc[fold_mask, selected_prob_col].values
+        selected_metrics = binary_metrics(y_fold, selected_fold_prob)
+
+        cv_pred_df.loc[fold_mask, "cv_final_advanced_selected_method"] = selected_method
+        cv_advanced_rows.append({
+            "fold": fold_id,
+            "n_cases": int(fold_mask.sum()),
+            "positive_count": int(np.sum(y_fold == 1)),
+            "cv_together_auc": together_fold_metrics["auc"],
+            "cv_allotherdata_auc": allother_fold_metrics["auc"],
+            "selected_method": selected_method,
+            "selected_probability_column": selected_prob_col,
+            "selected_fold_auc": selected_metrics["auc"],
+            "best_combination_auc": best_combination_auc,
+        })
+
+    cv_advanced_combination_df = pd.DataFrame(combination_rows).sort_values("auc", ascending=False)
+    cv_advanced_combination_path = os.path.join(out_dir, "cv_final_advanced_combination_search.xlsx")
+    cv_advanced_combination_df.to_excel(cv_advanced_combination_path, index=False)
+
+    cv_advanced_selection_df = pd.DataFrame(cv_advanced_rows)
+    cv_advanced_selection_path = os.path.join(out_dir, "cv_final_advanced_fold_selection.xlsx")
+    cv_advanced_selection_df.to_excel(cv_advanced_selection_path, index=False)
+
     cv_pred_df = cv_pred_df.sort_values([FOLD_COL, "Patient_set", "Patient_index"])
     cv_pred_path = os.path.join(out_dir, "cv_predictions.xlsx")
     cv_pred_df.to_excel(cv_pred_path, index=False)
@@ -589,108 +825,97 @@ def run_experiment(args, labels_df, split_path):
     cv_fold_metrics_df.to_excel(os.path.join(out_dir, "cv_fold_metrics.xlsx"), index=False)
 
     y_cv_true = cv_pred_df[LABEL_COL].astype(int).values
-    y_cv_prob = cv_pred_df["pred_prob"].values
-    cv_together_metrics = binary_metrics(y_cv_true, y_cv_prob)
-    cv_mean_metrics = {key: float(cv_fold_metrics_df[key].mean()) for key in METRIC_KEYS}
-    cv_mean_auc_ci_low, cv_mean_auc_ci_high = bootstrap_mean_ci(cv_fold_metrics_df["auc"].values)
-    cv_mean_metrics["auc_ci_low"] = cv_mean_auc_ci_low
-    cv_mean_metrics["auc_ci_high"] = cv_mean_auc_ci_high
-    cv_mean_metrics["threshold"] = float(cv_fold_metrics_df["threshold"].mean())
-    if cv_together_metrics["auc"] >= cv_mean_metrics["auc"]:
-        cv_selected_metric_mode = "together"; cv_better_metrics = cv_together_metrics
+    cv_together_metrics = binary_metrics(y_cv_true, cv_pred_df["prob_cv"].values)
+    cv_allotherdata_metrics = binary_metrics(y_cv_true, cv_pred_df["prob_cv_allotherdata"].values)
+    cv_final_advanced_metrics = binary_metrics(y_cv_true, cv_pred_df["prob_cv_final_advanced"].values)
+    if cv_together_metrics["auc"] >= cv_allotherdata_metrics["auc"]:
+        cv_final_selected_method = "together"
+        cv_final_metrics = cv_together_metrics
+        cv_final_prob_col = "prob_cv"
     else:
-        cv_selected_metric_mode = "mean"; cv_better_metrics = cv_mean_metrics
-    pd.DataFrame([metrics_row("together", cv_together_metrics), metrics_row("mean", cv_mean_metrics), metrics_row("better", cv_better_metrics, extra={"selected_mode": cv_selected_metric_mode})]).to_excel(os.path.join(out_dir, "cv_metrics.xlsx"), index=False)
+        cv_final_selected_method = "allotherdata"
+        cv_final_metrics = cv_allotherdata_metrics
+        cv_final_prob_col = "prob_cv_allotherdata"
 
-    cv_better_roc_path = os.path.join(out_dir, f"ROC_curve_train_cv_better_{CLASSIFIER_ARG}.pdf")
-    if cv_selected_metric_mode == "together":
-        plot_roc_curve(y_cv_true, y_cv_prob, title=f"Train CV Better ROC - {CLASSIFIER_ARG} (together)", save_path=cv_better_roc_path)
-    else:
-        plot_cv_mean_roc(cv_pred_df, title=f"Train CV Better ROC - {CLASSIFIER_ARG} (mean folds)", save_path=cv_better_roc_path)
+    pd.DataFrame([
+        metrics_row("together", cv_together_metrics, extra={"method": "together"}),
+        metrics_row("allotherdata", cv_allotherdata_metrics, extra={"method": "allotherdata"}),
+        metrics_row("final", cv_final_metrics, extra={"method": "final", "selected_method": cv_final_selected_method}),
+        metrics_row("final_advanced", cv_final_advanced_metrics, extra={"method": "final_advanced", "selection_file": cv_advanced_selection_path}),
+    ]).to_excel(os.path.join(out_dir, "cv_metrics.xlsx"), index=False)
 
-    test_pred_df = merged_df.loc[test_idx, ID_COLS + [SPLIT_COL, FOLD_COL, LABEL_COL]].copy()
-    y_test = test_pred_df[LABEL_COL].astype(int).values
-    test_method_rows = []
-    fold_test_metrics = []
-    for fold_id in range(N_SPLITS):
-        fold_model = joblib.load(os.path.join(out_dir, f"fold{fold_id}_model.joblib"))
-        prob = fold_model.predict_proba(X_selected[test_idx])[:, 1]
-        prob_col = f"prob_fold{fold_id}_model"
-        test_pred_df[prob_col] = prob
-        method_metrics = binary_metrics(y_test, prob)
-        fold_test_metrics.append((fold_id, method_metrics, prob_col))
-        test_method_rows.append(metrics_row(f"fold{fold_id}_model", method_metrics, extra={"method": "fold_model", "fold_model": fold_id}))
-    fold_prob_cols = [f"prob_fold{fold_id}_model" for fold_id in range(N_SPLITS)]
-    test_pred_df["prob_mean"] = test_pred_df[fold_prob_cols].mean(axis=1)
-    test_mean_metrics = binary_metrics(y_test, test_pred_df["prob_mean"].values)
-    test_method_rows.append(metrics_row("mean", test_mean_metrics, extra={"method": "mean"}))
-    best_fold_id, test_best_metrics, best_prob_col = max(fold_test_metrics, key=lambda item: item[1]["auc"])
-    test_pred_df["best_model_fold"] = best_fold_id
-    test_pred_df["prob_best"] = test_pred_df[best_prob_col]
-    test_method_rows.append(metrics_row("best", test_best_metrics, extra={"method": "best", "best_model_fold": best_fold_id}))
+    cv_together_roc_path = os.path.join(out_dir, f"ROC_curve_train_cv_together_{CLASSIFIER_ARG}.pdf")
+    cv_allotherdata_roc_path = os.path.join(out_dir, f"ROC_curve_train_cv_allotherdata_{CLASSIFIER_ARG}.pdf")
+    cv_final_roc_path = os.path.join(out_dir, f"ROC_curve_train_cv_final_{CLASSIFIER_ARG}.pdf")
+    cv_final_advanced_roc_path = os.path.join(out_dir, f"ROC_curve_train_cv_final_advanced_{CLASSIFIER_ARG}.pdf")
+    plot_roc_curve(y_cv_true, cv_pred_df["prob_cv"].values, title=f"Train CV Together ROC - {CLASSIFIER_ARG}", save_path=cv_together_roc_path)
+    plot_roc_curve(y_cv_true, cv_pred_df["prob_cv_allotherdata"].values, title=f"Train CV All-Other-Data ROC - {CLASSIFIER_ARG}", save_path=cv_allotherdata_roc_path)
+    plot_roc_curve(y_cv_true, cv_pred_df[cv_final_prob_col].values, title=f"Train CV Final ROC - {CLASSIFIER_ARG} ({cv_final_selected_method})", save_path=cv_final_roc_path)
+    plot_roc_curve(y_cv_true, cv_pred_df["prob_cv_final_advanced"].values, title=f"Train CV Final Advanced ROC - {CLASSIFIER_ARG}", save_path=cv_final_advanced_roc_path)
+
     alldata_model = train_fixed_model(X_train_selected, y_train_full, args.random_state, best_params)
     alldata_model_path = os.path.join(out_dir, "alldata_model.joblib")
     joblib.dump(alldata_model, alldata_model_path)
-    test_pred_df["prob_alldata"] = alldata_model.predict_proba(X_selected[test_idx])[:, 1]
-    test_alldata_metrics = binary_metrics(y_test, test_pred_df["prob_alldata"].values)
-    test_method_rows.append(metrics_row("alldata", test_alldata_metrics, extra={"method": "alldata", "model_path": alldata_model_path}))
-    test_final_selected_method, test_final_metrics = max([("mean", test_mean_metrics), ("best", test_best_metrics), ("alldata", test_alldata_metrics)], key=lambda item: item[1]["auc"])
-    if test_final_selected_method == "mean":
-        test_pred_df["prob_final"] = test_pred_df["prob_mean"]
-    elif test_final_selected_method == "best":
-        test_pred_df["prob_final"] = test_pred_df["prob_best"]
-    else:
-        test_pred_df["prob_final"] = test_pred_df["prob_alldata"]
-    test_pred_df["final_selected_method"] = test_final_selected_method
-    test_method_rows.append(metrics_row("final", test_final_metrics, extra={"method": "final", "selected_method": test_final_selected_method}))
-    test_pred_path = os.path.join(out_dir, "test_predictions.xlsx")
-    test_pred_df = test_pred_df.sort_values(["Patient_set", "Patient_index"])
-    test_pred_df.to_excel(test_pred_path, index=False)
-    pd.DataFrame(test_method_rows).to_excel(os.path.join(out_dir, "test_metrics.xlsx"), index=False)
-    test_final_roc_path = os.path.join(out_dir, f"ROC_curve_internal_test_final_{CLASSIFIER_ARG}.pdf")
-    plot_roc_curve(test_pred_df[LABEL_COL].astype(int).values, test_pred_df["prob_final"].values, title=f"Internal Test Final ROC - {CLASSIFIER_ARG}", save_path=test_final_roc_path)
+
+    internal_results = evaluate_holdout_set("internal_test", "Internal Test", out_dir, merged_df, X_selected, internal_test_idx, alldata_model, alldata_model_path)
+    external_results = evaluate_holdout_set("external_test", "External Test", out_dir, merged_df, X_selected, external_test_idx, alldata_model, alldata_model_path)
 
     summary = {
         "model": MODEL_LABEL,
         "status": "completed",
         **best_info,
-        "cv_selected_metric_mode": cv_selected_metric_mode,
-        **prefixed_metrics("cv_better", cv_better_metrics),
+        "cv_final_selected_method": cv_final_selected_method,
+        "cv_final_advanced_fold_selection": cv_advanced_selection_path,
+        "cv_final_advanced_combination_search": cv_advanced_combination_path,
+        **prefixed_metrics("cv_final", cv_final_metrics),
+        **prefixed_metrics("cv_final_advanced", cv_final_advanced_metrics),
         **prefixed_metrics("cv_together", cv_together_metrics),
-        **prefixed_metrics("cv_mean", cv_mean_metrics),
-        "test_final_selected_method": test_final_selected_method,
-        "test_best_selected_model_fold": int(best_fold_id),
-        **prefixed_metrics("test_final", test_final_metrics),
-        **prefixed_metrics("test_mean", test_mean_metrics),
-        **prefixed_metrics("test_best", test_best_metrics),
-        **prefixed_metrics("test_alldata", test_alldata_metrics),
+        **prefixed_metrics("cv_allotherdata", cv_allotherdata_metrics),
+        "internal_test_final_selected_method": internal_results["final_selected_method"],
+        "internal_test_best_selected_model_fold": internal_results["best_selected_model_fold"],
+        **prefixed_metrics("internal_test_final", internal_results["final_metrics"]),
+        **prefixed_metrics("internal_test_mean", internal_results["mean_metrics"]),
+        **prefixed_metrics("internal_test_best", internal_results["best_metrics"]),
+        **prefixed_metrics("internal_test_alldata", internal_results["alldata_metrics"]),
+        "external_test_final_selected_method": external_results["final_selected_method"],
+        "external_test_best_selected_model_fold": external_results["best_selected_model_fold"],
+        **prefixed_metrics("external_test_final", external_results["final_metrics"]),
+        **prefixed_metrics("external_test_mean", external_results["mean_metrics"]),
+        **prefixed_metrics("external_test_best", external_results["best_metrics"]),
+        **prefixed_metrics("external_test_alldata", external_results["alldata_metrics"]),
         "cv_predictions": cv_pred_path,
-        "test_predictions": test_pred_path,
-        "cv_better_roc": cv_better_roc_path,
-        "test_final_roc": test_final_roc_path,
+        "internal_test_predictions": internal_results["predictions"],
+        "external_test_predictions": external_results["predictions"],
+        "cv_together_roc": cv_together_roc_path,
+        "cv_allotherdata_roc": cv_allotherdata_roc_path,
+        "cv_final_roc": cv_final_roc_path,
+        "cv_final_advanced_roc": cv_final_advanced_roc_path,
+        "internal_test_final_roc": internal_results["final_roc"],
+        "external_test_final_roc": external_results["final_roc"],
         "alldata_model_path": alldata_model_path,
     }
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=4)
+
     print(f"\n========== {MODEL_LABEL} Summary ==========")
     print("Output directory:", out_dir)
     print("Best params:", best_params)
     print("Selected features:", len(selected_features))
-    print("CV selected mode:", cv_selected_metric_mode)
-    print("CV better AUC:", f"{summary['cv_better_auc']:.4f}")
-    print("Test final selected method:", test_final_selected_method)
-    print("Test final AUC:", f"{summary['test_final_auc']:.4f}")
-
+    print("CV final selected method:", cv_final_selected_method)
+    print("CV final AUC:", f"{summary['cv_final_auc']:.4f}")
+    print("CV final advanced AUC:", f"{summary['cv_final_advanced_auc']:.4f}")
+    print("Internal test final selected method:", internal_results["final_selected_method"])
+    print("Internal test final AUC:", f"{summary['internal_test_final_auc']:.4f}")
+    print("External test final selected method:", external_results["final_selected_method"])
+    print("External test final AUC:", f"{summary['external_test_final_auc']:.4f}")
 
 def main():
     global LABEL_COL
     args = parse_args()
-    LABEL_COL = get_label_col(args.task)
     configure_trial_paths(args.trial_name)
     print("Trial name:", args.trial_name)
-    print("PCC radiomics path:", PCC_RADIOMICS_PATH)
-    print("Select output dir:", SELECT_OUT_DIR)
-    print("Model output root:", get_model_out_dir(args.task))
+    print("PCC feature path:", PCC_RADIOMICS_PATH)
+    LABEL_COL = get_label_col(args.task)
     labels_df, split_path = load_patient_split(random_state=args.random_state, task=args.task)
     if args.classifier is None:
         return

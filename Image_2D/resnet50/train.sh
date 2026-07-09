@@ -15,12 +15,12 @@ OPTIMIZER="sgd"  # choices: sgd, adam
 INPUT_MODE="2.5d"  # choices: 2d, 2.5d
 
 RANDOM_STATE_LIST="0" 
-SPLIT_MODE="cv"  # choices: cv, all
+SPLIT_MODE="cv"  # choices: cv, all, all_data
 FOLD_LIST="01234"  # examples: 01234 or 012345
 VAL_FOLD_LIST=("4" "3" "2" "1" "0")  # for cross-validation, the fold to use as validation; must match FOLD_LIST
 
-TRAIN_BATCH_SIZE=30
-TRAIN_NUM_STEPS=150
+TRAIN_BATCH_SIZE=20
+TRAIN_NUM_STEPS=100
 SAVE_MODELS_EVERY=5
 
 for RANDOM_STATE in ${RANDOM_STATE_LIST}; do

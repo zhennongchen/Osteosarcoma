@@ -47,6 +47,8 @@ For the first implementation, keep clinical preprocessing leakage-safe:
 
 See `references/clinical_model_workflow.md` for the full workflow and terminology.
 
+For the current set123 redo, see `references/clinical_model_workflow.md` section "Set123 Clinical Workflow - 2026-07-08". It records the latest train/internal/external split-aware baseline, univariate, multivariate, and ML-ready clinical table conventions.
+
 ## Current Clinical Variable Pool - 2026-06-27
 
 The user-defined clinical variable pool for the Osteosarcoma/Habitats clinical model is now:

@@ -202,6 +202,173 @@ For `Prognosis_label` and `Pathologic_label` as binary tasks:
 - Missing clinical variables need explicit imputation rules.
 - Clinical variables collected after treatment should not be used for pre-treatment prediction unless the task explicitly allows post-treatment information.
 
+
+## Set123 Clinical Workflow - 2026-07-08
+
+This section records the latest completed clinical-variable workflow after adding `set_3` and moving from the old set12 train/internal split to the set123 train/internal/external design.
+
+### Current Inputs And Outputs
+
+Primary notebook:
+
+```text
+/host/d/Github/Osteosarcoma/clinical/clinical_features.ipynb
+```
+
+Current patient/split files:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random{0,10,20,30,40}.xlsx
+```
+
+The file name still contains `5fold`, but the current training CV is 4-fold. Fold meanings are:
+
+```text
+train: fold 0,1,2,3
+internal test: fold 4
+external test: fold 5
+```
+
+Current case counts:
+
+```text
+total = 351
+train = 184, with 46 cases per training fold
+internal test = 98
+external test = 69
+```
+
+Current processed clinical outputs:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_clinical_variables.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_clinical_variables_processed.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/clinical_baseline_table_prognosis.xlsx
+/host/d/projects/Habitats/radiomics/clinical_variables/clinical_univariate_logistic_prognosis.xlsx
+/host/d/projects/Habitats/radiomics/clinical_variables/clinical_multivariate_logistic_prognosis.xlsx
+/host/d/projects/Habitats/radiomics/clinical_variables/clinical_variables_raw.xlsx
+/host/d/projects/Habitats/radiomics/clinical_variables/clinical_variables_normalized.xlsx
+```
+
+### Clinical Feature Construction
+
+Derived tumor features are calculated from original-space `label.nii.gz`, not resampled labels:
+
+```text
+Tumor_AP_diameter_mm
+Tumor_longitudinal_diameter_mm
+Tumor_transverse_diameter_mm
+Tumor_volume_mm3
+```
+
+Use the original label header/spacing to convert voxel extents/volume into physical units.
+
+Clinical missingness rule:
+
+```text
+drop variables with missing percentage > 40%
+impute remaining missing values with KNN imputation, n_neighbors = 3
+```
+
+Sex and lesion site are translated to English. Current lesion-site grouping:
+
+```text
+Femur
+Tibia and fibula
+Others
+```
+
+This grouping must be idempotent: an already grouped `Tibia and fibula` remains `Tibia and fibula`.
+
+### Baseline Table Rule
+
+Baseline is a paper-style label comparison table within each dataset split. It should not compare train vs internal/external directly.
+
+For each split:
+
+```text
+training: label 0 vs label 1
+internal_test: label 0 vs label 1
+external_test: label 0 vs label 1
+```
+
+The output columns should include all three groups:
+
+```text
+training_label0, training_label1, training_p_value, training_p_method
+internal_test_label0, internal_test_label1, internal_test_p_value, internal_test_p_method
+external_test_label0, external_test_label1, external_test_p_value, external_test_p_method
+```
+
+Continuous variables:
+
+- summarize as median [IQR] plus mean +/- SD when useful;
+- use Shapiro normality checks;
+- use Welch t-test if both label groups are normal;
+- otherwise use Mann-Whitney U test.
+
+Categorical variables:
+
+- summarize as n (%);
+- use a single global multi-category p value for a parent categorical variable such as `Tumor location`;
+- use chi-square when expected counts are adequate, otherwise Fisher/exact-style fallback where implemented.
+
+### Univariate And Multivariate Logistic Regression
+
+Univariate/multivariate logistic regression uses only the training split:
+
+```text
+train_df = clinical_split_df[clinical_split_df["split"] == "train"]
+```
+
+This means internal and external tests do not influence paper-style OR/p-value reporting.
+
+Univariate:
+
+- fit one clinical variable at a time;
+- report coefficient, OR, 95% CI, p value, and convergence/fit status;
+- use the user-defined `p_threshold` to choose candidates for multivariate analysis.
+
+Multivariate:
+
+- fit selected univariate candidates together;
+- report adjusted OR, 95% CI, and p value;
+- if no variables pass the threshold or the fit is unstable, report that explicitly rather than forcing a model.
+
+For modeling multi-category lesion site:
+
+- use dummy variables with `Others` as the implicit reference;
+- current model terms are `Lesion_site_Femur` and `Lesion_site_Tibia_and_fibula`.
+
+### ML-Ready Clinical Table
+
+The final normalized clinical matrix should look like a radiomics feature table:
+
+```text
+Patient_set
+Patient_index
+Image_filepath
+Mask_filepath
+Prognosis_label
+Pathologic_label
+split
+fold
+<normalized clinical feature columns>
+```
+
+Use this file as the input for clinical ML:
+
+```text
+/host/d/projects/Habitats/radiomics/clinical_variables/clinical_variables_normalized.xlsx
+```
+
+For categorical variables:
+
+- binary sex is encoded numerically/dummy-style;
+- lesion site is one-hot/dummy encoded with `Others` as reference;
+- do not include an explicit `Others` model column unless the user changes the reference-category decision.
+
 ## Literature Variable Mapping - Li 2026 and Wang 2025
 
 Recorded after comparing the project cohort table `/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set12.xlsx` with clinical variables from:

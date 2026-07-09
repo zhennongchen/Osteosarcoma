@@ -448,3 +448,103 @@ When adapting old scripts for the redo, preserve these proven design patterns un
 - keep `cv_together`, `cv_better`, and internal-test final metrics separately;
 - keep manual `final_selection.ipynb` style for probability fusion.
 
+## Set123 Split Redo - 2026-07-08
+
+This section supersedes the "planned" notes above for the latest completed patient split and clinical feature application.
+
+Primary split notebook:
+
+```text
+/host/d/Github/Osteosarcoma/patient_split.ipynb
+```
+
+Primary patient list:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123.xlsx
+```
+
+Current split files:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random0.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random10.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random20.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random30.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random40.xlsx
+```
+
+The filename still says `5fold`, but the current design is 4-fold training CV plus internal/external test folds:
+
+```text
+total cases = 351
+train = 184
+internal test = 98
+external test = 69
+
+train folds: 0,1,2,3, with 46 cases each
+internal test fold: 4
+external test fold: 5
+```
+
+Current fold random states:
+
+```text
+0, 10, 20, 30, 40
+```
+
+Current selected outer split seed:
+
+```text
+8709
+```
+
+Current split report:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_4fold_prognosis_tumor_balance_report.xlsx
+```
+
+The split balance rule is no longer an inter-group comparison such as train vs internal or train vs external. Instead, for each tumor-derived variable, the p-value pattern for label 0 vs label 1 must match across all three datasets:
+
+```text
+within train: label 0 vs label 1
+within internal test: label 0 vs label 1
+within external test: label 0 vs label 1
+```
+
+For each tumor variable, compare whether each within-split p value is below `0.05`. The accepted current split has all four tumor variables on the same side of the threshold across train/internal/external; currently all are non-significant:
+
+```text
+Tumor_AP_diameter_mm
+Tumor_longitudinal_diameter_mm
+Tumor_transverse_diameter_mm
+Tumor_volume_mm3
+```
+
+Recorded current tumor p values:
+
+```text
+Tumor_AP_diameter_mm: train 0.059398, internal 0.059633, external 0.070890
+Tumor_longitudinal_diameter_mm: train 0.074679, internal 0.257132, external 0.108042
+Tumor_transverse_diameter_mm: train 0.050967, internal 0.092223, external 0.066912
+Tumor_volume_mm3: train 0.088699, internal 0.103810, external 0.051220
+```
+
+When adapting old ML scripts:
+
+- do not assume fold 5 is internal test;
+- internal test is fold 4;
+- external test is fold 5;
+- train CV should use folds 0-3 unless the user changes the split design again;
+- update summary logic to support external-test metrics when the user asks for model-script changes.
+
+Clinical baseline after this split should contain three dataset groups:
+
+```text
+training
+internal_test
+external_test
+```
+
+and each group is still label 0 vs label 1, not train-vs-test.

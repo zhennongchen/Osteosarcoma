@@ -6,6 +6,7 @@ PYTHON_SCRIPT="${SCRIPT_DIR}/RF.py"
 TASK="${TASK:-Prognosis}"
 TRIAL_NAME="${TRIAL_NAME:-dl_3d_ml}"
 RANDOM_STATE_LIST="${RANDOM_STATE_LIST:-0 10 20 30 40}"
+GRIDSEARCH_RANGE="${GRIDSEARCH_RANGE:-train}"
 TOP_K_LIST="${TOP_K_LIST:-20 25 30}"
 LASSO_TOP_K_LIST="${LASSO_TOP_K_LIST:-None ${TOP_K_LIST}}"
 
@@ -16,6 +17,7 @@ for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
       python3 "${PYTHON_SCRIPT}" \
         --classifier RF \
         --task "${TASK}" \
+        --gridsearch_range "${GRIDSEARCH_RANGE}" \
     --trial_name "${TRIAL_NAME}" \
         --random_state "${RANDOM_STATE}" \
         --rf_feature_selector "${selector}" \
@@ -26,6 +28,7 @@ for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
   python3 "${PYTHON_SCRIPT}" \
     --classifier RF \
     --task "${TASK}" \
+    --gridsearch_range "${GRIDSEARCH_RANGE}" \
     --trial_name "${TRIAL_NAME}" \
     --random_state "${RANDOM_STATE}" \
     --rf_feature_selector rfecv
@@ -34,6 +37,7 @@ for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
     python3 "${PYTHON_SCRIPT}" \
       --classifier RF \
       --task "${TASK}" \
+      --gridsearch_range "${GRIDSEARCH_RANGE}" \
     --trial_name "${TRIAL_NAME}" \
       --random_state "${RANDOM_STATE}" \
       --rf_feature_selector lasso \

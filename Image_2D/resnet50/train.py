@@ -66,9 +66,9 @@ def resolve_train_val_folds(split_mode, fold_list_value, val_fold_value):
     if val_fold is None or len(val_fold) == 0:
         raise ValueError('Please set --val_fold. Example: --val_fold 4 or --val_fold 012345')
 
-    invalid_folds = [fold for fold in fold_list + val_fold if fold not in [0, 1, 2, 3, 4, 5]]
+    invalid_folds = [fold for fold in fold_list + val_fold if fold not in [0, 1, 2, 3, 4, 5, 6]]
     if invalid_folds:
-        raise ValueError(f'Fold values must be among 0,1,2,3,4,5. Invalid: {invalid_folds}')
+        raise ValueError(f'Fold values must be among 0,1,2,3,4,5,6. Invalid: {invalid_folds}')
 
     split_mode = str(split_mode).lower()
     if split_mode == 'cv':
@@ -78,11 +78,11 @@ def resolve_train_val_folds(split_mode, fold_list_value, val_fold_value):
             raise ValueError(f'In cv mode, val_fold must be inside fold_list. fold_list={fold_list}, val_fold={val_fold}')
         train_fold = [fold for fold in fold_list if fold not in val_fold]
         setting_suffix = f'fold{fold_tag(val_fold)}'
-    elif split_mode == 'all':
+    elif split_mode in {'all', 'all_data'}:
         train_fold = list(fold_list)
         setting_suffix = f'all_fold{fold_tag(val_fold)}'
     else:
-        raise ValueError(f"--split_mode must be 'cv' or 'all'. Got: {split_mode}")
+        raise ValueError(f"--split_mode must be 'cv', 'all', or 'all_data'. Got: {split_mode}")
 
     if len(train_fold) == 0:
         raise ValueError(f'Training fold list is empty. split_mode={split_mode}, fold_list={fold_list}, val_fold={val_fold}')
@@ -108,9 +108,9 @@ def parse_args():
 
     # Patient split settings.
     parser.add_argument('--random_state', type=int, default=0)
-    parser.add_argument('--split_mode', type=str, default='cv', choices=['cv', 'all'])
-    parser.add_argument('--fold_list', type=str, default='01234', help='Training fold universe. Examples: 01234, 012345, or 0,1,2,3,4.')
-    parser.add_argument('--val_fold', type=str, default=None, help='Validation fold(s). Examples: 4, 012345, or 0,1,2,3,4,5.')
+    parser.add_argument('--split_mode', type=str, default='cv', choices=['cv', 'all', 'all_data'])
+    parser.add_argument('--fold_list', type=str, default='01234', help='Training fold universe. Examples: 01234, 0123456, or 0,1,2,3,4.')
+    parser.add_argument('--val_fold', type=str, default=None, help='Validation fold(s). Examples: 5, 6, 45, 01234, or 0123456.')
 
     # Training settings.
     parser.add_argument('--optimizer', type=str, default='sgd', choices=['sgd', 'adam', 'adamw'])
@@ -192,7 +192,7 @@ def main():
 
     patient_list_file = (
         '/host/e/D/Data/Habitats/Jishuitan/Patient_lists/'
-        f'image_label_info_set12_5fold_{label.lower()}_random{args.random_state}.xlsx'
+        f'image_label_info_set123_5fold_{label.lower()}_random{args.random_state}.xlsx'
     )
     print('patient_list_file:', patient_list_file)
 

@@ -7,7 +7,7 @@ description: Use when working on the Osteosarcoma voxel-based habitat pipeline, 
 
 For Osteosarcoma voxel-based habitat questions, read `references/workflow.md` first. This skill captures the agreed workflow and naming decisions from the completed `step1_make_habitat.ipynb` pipeline.
 
-For the current ML redesign, read `references/ml_redesign_2026_06.md` when the request involves model scripts, patient splits, `main.sh`, CV/test metrics, resume behavior, feature-selection scope, or summaries.
+For the current ML redesign, read `references/ml_redesign_2026_06.md` when the request involves model scripts, patient splits, `main.sh`, CV/test metrics, resume behavior, feature-selection scope, or summaries. The latest set123 train/internal/external split is recorded there under "Set123 Split Redo - 2026-07-08".
 
 For the 2026-06-15 paper-style cohort-level K selection update, read `references/workflow.md` section "Step 2 Alternative".
 

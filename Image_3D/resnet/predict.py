@@ -24,9 +24,9 @@ import Osteosarcoma.Image_3D.resnet.model as resnet_model
 
 DEFAULT_MODEL_RANDOM_STATE = 0
 DEFAULT_MODEL_VAL_FOLD = 5
-DEFAULT_PRED_FOLDS = [0,1,2,3,4,5]
+DEFAULT_PRED_FOLDS = [0,1,2,3,4,5,6]
 
-FOLD_LIST = [0, 1, 2, 3, 4, 5]
+FOLD_LIST = [0, 1, 2, 3, 4, 5, 6]
 
 
 # ============================================================
@@ -77,9 +77,9 @@ def setting_suffix_from_split(split_mode, val_fold):
         if len(val_folds) != 1:
             raise ValueError(f'cv mode requires one validation fold. Got: {val_folds}')
         return f'fold{fold_tag(val_folds)}', val_folds
-    if str(split_mode).lower() == 'all':
+    if str(split_mode).lower() in {'all', 'all_data'}:
         return f'all_fold{fold_tag(val_folds)}', val_folds
-    raise ValueError(f"--split_mode must be 'cv' or 'all'. Got: {split_mode}")
+    raise ValueError(f"--split_mode must be 'cv', 'all', or 'all_data'. Got: {split_mode}")
 
 
 def safe_auc(y_true, y_score):
@@ -182,9 +182,9 @@ def parse_args():
     parser.add_argument('--augment_context', type=str, default='full', choices=['simple', 'full'])
     parser.add_argument('--in_channels', type=int, default=3)
     parser.add_argument('--random_state', type=int, default=DEFAULT_MODEL_RANDOM_STATE)
-    parser.add_argument('--split_mode', type=str, default='cv', choices=['cv', 'all'])
+    parser.add_argument('--split_mode', type=str, default='cv', choices=['cv', 'all', 'all_data'])
     parser.add_argument('--val_fold', type=str, default=str(DEFAULT_MODEL_VAL_FOLD), help='Which trained fold model to load. Examples: 4 or 012345.')
-    parser.add_argument('--pred_folds', type=parse_fold_list, default=DEFAULT_PRED_FOLDS, help='Prediction folds, e.g. "5" or "0,1,2,3,4".')
+    parser.add_argument('--pred_folds', type=parse_fold_list, default=DEFAULT_PRED_FOLDS, help='Prediction folds, e.g. "5", "6", "45", or "0,1,2,3,4".')
     parser.add_argument('--epoch', type=int, required=True)
     parser.add_argument('--trained_model_path', type=none_or_path, default=None)
     parser.add_argument('--batch_size', type=int, default=4)
@@ -241,7 +241,7 @@ def main():
 
     patient_list_file = os.path.join(
         PATIENT_LIST_ROOT,
-        f'image_label_info_set12_5fold_{label_lower}_random{args.random_state}.xlsx',
+        f'image_label_info_set123_5fold_{label_lower}_random{args.random_state}.xlsx',
     )
     setting_output_path = os.path.join(
         MODEL_ROOT,
