@@ -467,6 +467,28 @@ def completed_experiment_exists(out_dir):
     return summary.get("feature_selection_scope") == FEATURE_SELECTION_SCOPE
 
 
+
+
+def train_experiment_artifact_paths(out_dir):
+    return {
+        "model": os.path.join(out_dir, "alltraindata_model.joblib"),
+        "predictions": os.path.join(out_dir, "train_predictions.xlsx"),
+        "metrics": os.path.join(out_dir, "train_metrics.xlsx"),
+        "roc": os.path.join(out_dir, f"ROC_curve_train_alltraindata_{CLASSIFIER_ARG}.pdf"),
+    }
+
+
+def train_experiment_exists(out_dir):
+    paths = train_experiment_artifact_paths(out_dir)
+    if not all(os.path.exists(path) for path in paths.values()):
+        return False
+    summary_path = os.path.join(out_dir, "summary.json")
+    try:
+        summary = load_json_file(summary_path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return "train_auc" in summary
+
 def load_json_file(path):
     with open(path, "r") as f:
         return json.load(f)
@@ -485,6 +507,10 @@ def print_completed_summary(out_dir):
     print("Best params:", best_info.get("best_params", summary.get("best_params", "")))
     print("CV final selected method:", summary.get("cv_final_selected_method", ""))
     print("CV final AUC:", f"{summary.get('cv_final_auc', float('nan')):.4f}")
+    if "train_auc" in summary:
+        print("Train AUC:", f"{summary.get('train_auc', float('nan')):.4f}")
+    else:
+        print("Train experiment: missing")
     print("Internal test final selected method:", summary.get("internal_test_final_selected_method", ""))
     print("Internal test final AUC:", f"{summary.get('internal_test_final_auc', float('nan')):.4f}")
     print("External test final selected method:", summary.get("external_test_final_selected_method", ""))
@@ -596,6 +622,99 @@ def evaluate_holdout_set(
     }
 
 
+
+def run_train_experiment(out_dir, merged_df, X_selected, y, train_idx_all, random_state, best_params):
+    paths = train_experiment_artifact_paths(out_dir)
+    model = train_fixed_model(X_selected[train_idx_all], y[train_idx_all], random_state, best_params)
+    joblib.dump(model, paths["model"])
+
+    pred_df = merged_df.loc[train_idx_all, ID_COLS + [SPLIT_COL, FOLD_COL, LABEL_COL]].copy()
+    pred_df["prob_train"] = model.predict_proba(X_selected[train_idx_all])[:, 1]
+    train_metrics = binary_metrics(pred_df[LABEL_COL].astype(int).values, pred_df["prob_train"].values)
+
+    pred_df = pred_df.sort_values([FOLD_COL, "Patient_set", "Patient_index"])
+    pred_df.to_excel(paths["predictions"], index=False)
+
+    pd.DataFrame([
+        metrics_row(
+            "train",
+            train_metrics,
+            extra={
+                "method": "alltraindata_model_on_train",
+                "model_path": paths["model"],
+                "train_size": int(len(train_idx_all)),
+            },
+        )
+    ]).to_excel(paths["metrics"], index=False)
+
+    plot_roc_curve(
+        pred_df[LABEL_COL].astype(int).values,
+        pred_df["prob_train"].values,
+        title=f"Train All-Train-Data ROC - {CLASSIFIER_ARG}",
+        save_path=paths["roc"],
+    )
+
+    return {
+        "model": model,
+        "model_path": paths["model"],
+        "predictions": paths["predictions"],
+        "metrics": paths["metrics"],
+        "roc": paths["roc"],
+        "train_metrics": train_metrics,
+    }
+
+
+def run_train_only_for_completed_experiment(args, labels_df, split_path, out_dir):
+    _, merged_df, feature_cols, X, y, folds = load_features_and_labels(PCC_RADIOMICS_PATH, labels_df)
+
+    train_mask = merged_df[SPLIT_COL].eq("train") & merged_df[FOLD_COL].isin(TRAIN_FOLDS)
+    internal_test_mask = merged_df[SPLIT_COL].eq("internal test") & merged_df[FOLD_COL].eq(INTERNAL_TEST_FOLD)
+    external_test_mask = merged_df[SPLIT_COL].eq("external test") & merged_df[FOLD_COL].eq(EXTERNAL_TEST_FOLD)
+    accounted_mask = train_mask | internal_test_mask | external_test_mask
+    if int(accounted_mask.sum()) != len(merged_df):
+        raise ValueError("Merged table contains rows outside expected train/internal/external split.")
+
+    selected_features_path = os.path.join(out_dir, "selected_features.xlsx")
+    best_params_path = os.path.join(out_dir, "best_params.json")
+    summary_path = os.path.join(out_dir, "summary.json")
+    if not os.path.exists(selected_features_path):
+        raise FileNotFoundError(f"Missing selected_features.xlsx for train-only stage: {selected_features_path}")
+    if not os.path.exists(best_params_path):
+        raise FileNotFoundError(f"Missing best_params.json for train-only stage: {best_params_path}")
+    if not os.path.exists(summary_path):
+        raise FileNotFoundError(f"Missing summary.json for train-only stage: {summary_path}")
+
+    selected_df = pd.read_excel(selected_features_path)
+    if "selected_features" not in selected_df.columns:
+        raise ValueError(f"selected_features.xlsx must contain a selected_features column: {selected_features_path}")
+    selected_features = selected_df["selected_features"].dropna().astype(str).tolist()
+    missing_features = [feature for feature in selected_features if feature not in merged_df.columns]
+    if missing_features:
+        raise ValueError(f"Selected features are missing from merged feature table: {missing_features[:10]}")
+
+    best_info = load_json_file(best_params_path)
+    best_params = best_info.get("best_params")
+    if best_params is None:
+        raise ValueError(f"best_params.json does not contain best_params: {best_params_path}")
+
+    train_idx_all = np.where(train_mask.values)[0]
+    X_selected = merged_df[selected_features].values
+    train_results = run_train_experiment(out_dir, merged_df, X_selected, y, train_idx_all, args.random_state, best_params)
+
+    summary = load_json_file(summary_path)
+    summary.update({
+        **prefixed_metrics("train", train_results["train_metrics"]),
+        "train_predictions": train_results["predictions"],
+        "train_metrics": train_results["metrics"],
+        "train_roc": train_results["roc"],
+        "alltraindata_model_path": train_results["model_path"],
+    })
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=4)
+
+    print("Completed train-only stage for existing experiment.")
+    print("Train AUC:", f"{summary['train_auc']:.4f}")
+
 def run_experiment(args, labels_df, split_path):
     feature_selector = getattr(args, SELECTOR_ARG)
     radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(PCC_RADIOMICS_PATH, labels_df)
@@ -603,6 +722,11 @@ def run_experiment(args, labels_df, split_path):
     out_dir = os.path.join(get_model_out_dir(args.task), CLASSIFIER_DIR, experiment_name)
     os.makedirs(out_dir, exist_ok=True)
     if completed_experiment_exists(out_dir):
+        if train_experiment_exists(out_dir):
+            print_completed_summary(out_dir)
+            return
+        print("Existing completed experiment found, but train experiment is missing. Running train-only stage.")
+        run_train_only_for_completed_experiment(args, labels_df, split_path, out_dir)
         print_completed_summary(out_dir)
         return
 
@@ -684,6 +808,8 @@ def run_experiment(args, labels_df, split_path):
         json.dump(best_info, f, indent=4)
     pd.DataFrame(grid.cv_results_).to_excel(os.path.join(out_dir, "grid_search_results.xlsx"), index=False)
     pd.DataFrame({"selected_features": selected_features}).to_excel(os.path.join(out_dir, "selected_features.xlsx"), index=False)
+
+    train_results = run_train_experiment(out_dir, merged_df, X_selected, y, train_idx_all, args.random_state, best_params)
 
     cv_pred_df = merged_df.loc[train_idx_all, ID_COLS + [SPLIT_COL, FOLD_COL, LABEL_COL]].copy()
     cv_pred_df["prob_cv"] = np.nan
@@ -828,7 +954,7 @@ def run_experiment(args, labels_df, split_path):
     plot_roc_curve(y_cv_true, cv_pred_df[cv_final_prob_col].values, title=f"Train CV Final ROC - {CLASSIFIER_ARG} ({cv_final_selected_method})", save_path=cv_final_roc_path)
     plot_roc_curve(y_cv_true, cv_pred_df["prob_cv_final_advanced"].values, title=f"Train CV Final Advanced ROC - {CLASSIFIER_ARG}", save_path=cv_final_advanced_roc_path)
 
-    alldata_model = train_fixed_model(X_train_selected, y_train_full, args.random_state, best_params)
+    alldata_model = train_results["model"]
     alldata_model_path = os.path.join(out_dir, "alldata_model.joblib")
     joblib.dump(alldata_model, alldata_model_path)
 
@@ -844,6 +970,7 @@ def run_experiment(args, labels_df, split_path):
         "cv_final_advanced_combination_search": cv_advanced_combination_path,
         **prefixed_metrics("cv_final", cv_final_metrics),
         **prefixed_metrics("cv_final_advanced", cv_final_advanced_metrics),
+        **prefixed_metrics("train", train_results["train_metrics"]),
         **prefixed_metrics("cv_together", cv_together_metrics),
         **prefixed_metrics("cv_allotherdata", cv_allotherdata_metrics),
         "internal_test_final_selected_method": internal_results["final_selected_method"],
@@ -859,15 +986,19 @@ def run_experiment(args, labels_df, split_path):
         **prefixed_metrics("external_test_best", external_results["best_metrics"]),
         **prefixed_metrics("external_test_alldata", external_results["alldata_metrics"]),
         "cv_predictions": cv_pred_path,
+        "train_predictions": train_results["predictions"],
+        "train_metrics": train_results["metrics"],
         "internal_test_predictions": internal_results["predictions"],
         "external_test_predictions": external_results["predictions"],
         "cv_together_roc": cv_together_roc_path,
         "cv_allotherdata_roc": cv_allotherdata_roc_path,
         "cv_final_roc": cv_final_roc_path,
         "cv_final_advanced_roc": cv_final_advanced_roc_path,
+        "train_roc": train_results["roc"],
         "internal_test_final_roc": internal_results["final_roc"],
         "external_test_final_roc": external_results["final_roc"],
         "alldata_model_path": alldata_model_path,
+        "alltraindata_model_path": train_results["model_path"],
     }
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=4)
@@ -879,6 +1010,7 @@ def run_experiment(args, labels_df, split_path):
     print("CV final selected method:", cv_final_selected_method)
     print("CV final AUC:", f"{summary['cv_final_auc']:.4f}")
     print("CV final advanced AUC:", f"{summary['cv_final_advanced_auc']:.4f}")
+    print("Train AUC:", f"{summary['train_auc']:.4f}")
     print("Internal test final selected method:", internal_results["final_selected_method"])
     print("Internal test final AUC:", f"{summary['internal_test_final_auc']:.4f}")
     print("External test final selected method:", external_results["final_selected_method"])

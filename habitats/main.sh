@@ -9,7 +9,7 @@ METHOD_LIST="${METHOD_LIST:-SVM LR RF KNN XGBoost}"
 RANDOM_STATE_LIST="${RANDOM_STATE_LIST:-0 10 20 30 40}"
 GRIDSEARCH_RANGE="${GRIDSEARCH_RANGE:-all}"  # choices: train, all
 TOP_K_LIST="${TOP_K_LIST:-7 10 12 15 17 20 22 25 27 30}"
-HABITAT_MODE="${HABITAT_MODE:-sum}"
+HABITAT_MODE="${HABITAT_MODE:-avg}" # choices: individual, avg, sum
 
 if [[ "${HABITAT_MODE}" == "individual" ]]; then
   PCC_RADIOMICS_PATH="${PCC_RADIOMICS_PATH:-/host/d/projects/Habitats/radiomics/habitats_individual/habitat_radiomics_measurements_avg_PCC.xlsx}"

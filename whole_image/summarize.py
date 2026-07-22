@@ -22,6 +22,7 @@ EXPERIMENT_RE = re.compile(
     re.IGNORECASE,
 )
 METRIC_PREFIXES = [
+    "train",
     "cv_final",
     "cv_final_advanced",
     "cv_together",
@@ -66,6 +67,8 @@ FULL_COLUMNS = [
     "skip_reason",
     "selected_feature_table",
     "cv_predictions",
+    "train_predictions",
+    "train_metrics",
     "cv_final_advanced_fold_selection",
     "cv_final_advanced_combination_search",
     "internal_test_predictions",
@@ -74,9 +77,11 @@ FULL_COLUMNS = [
     "cv_allotherdata_roc",
     "cv_final_roc",
     "cv_final_advanced_roc",
+    "train_roc",
     "internal_test_final_roc",
     "external_test_final_roc",
     "alldata_model_path",
+    "alltraindata_model_path",
     "split_file",
 ]
 COMPACT_COLUMNS = [
@@ -89,6 +94,12 @@ COMPACT_COLUMNS = [
     "top_k",
     "feature_selection_scope",
     "selected_feature_count",
+    "train_auc",
+    "train_auc_ci_low",
+    "train_auc_ci_high",
+    "train_accuracy",
+    "train_sensitivity",
+    "train_specificity",
     "cv_final_selected_method",
     "cv_final_auc",
     "cv_final_auc_ci_low",
@@ -226,6 +237,8 @@ def build_completed_row(classifier_dir: str, experiment_dir: Path, data: dict[st
             "skip_reason": "",
             "selected_feature_table": data.get("selected_feature_table", ""),
             "cv_predictions": data.get("cv_predictions", ""),
+            "train_predictions": data.get("train_predictions", ""),
+            "train_metrics": data.get("train_metrics", ""),
             "cv_final_advanced_fold_selection": data.get("cv_final_advanced_fold_selection", ""),
             "cv_final_advanced_combination_search": data.get("cv_final_advanced_combination_search", ""),
             "internal_test_predictions": data.get("internal_test_predictions", data.get("test_predictions", "")),
@@ -234,9 +247,11 @@ def build_completed_row(classifier_dir: str, experiment_dir: Path, data: dict[st
             "cv_allotherdata_roc": data.get("cv_allotherdata_roc", ""),
             "cv_final_roc": data.get("cv_final_roc", data.get("cv_better_roc", "")),
             "cv_final_advanced_roc": data.get("cv_final_advanced_roc", ""),
+            "train_roc": data.get("train_roc", ""),
             "internal_test_final_roc": data.get("internal_test_final_roc", data.get("test_final_roc", "")),
             "external_test_final_roc": data.get("external_test_final_roc", ""),
             "alldata_model_path": data.get("alldata_model_path", ""),
+            "alltraindata_model_path": data.get("alltraindata_model_path", ""),
             "split_file": data.get("split_file", ""),
         }
     )

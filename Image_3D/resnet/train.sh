@@ -13,13 +13,13 @@ START_STEP=0
 OPTIMIZER="adam"  # choices: sgd, adam
 
 RANDOM_STATE_LIST="0"
-SPLIT_MODE="cv"  # choices: cv, all, all_data
-FOLD_LIST="01234"  # examples: 01234 or 012345
-VAL_FOLD_LIST=("4" "3" "2" "1" "0")  # list of validation folds to run; must be in FOLD_LIST
+SPLIT_MODE="all"  # choices: cv, all, all_data
+FOLD_LIST="0123456"  # examples: 01234 or 012345
+VAL_FOLD_LIST=("56" )  # list of validation folds to run; must be in FOLD_LIST
 
-TRAIN_BATCH_SIZE=15
+TRAIN_BATCH_SIZE=20
 TRAIN_NUM_STEPS=100
-SAVE_MODELS_EVERY=5
+SAVE_MODELS_EVERY=2
 
 for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
     for VAL_FOLD in "${VAL_FOLD_LIST[@]}"; do
