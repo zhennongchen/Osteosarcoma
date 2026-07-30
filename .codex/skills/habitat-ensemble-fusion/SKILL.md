@@ -47,3 +47,8 @@ For this project, likely base learners are:
 - optional clinical model
 
 For stacking meta-learners, reasonable candidates following the Ki-67 ccRCC paper are RF, AdaBoost, XGBoost, LightGBM, and ExtraTrees. Prefer strong regularization and shallow/controlled models because the meta-feature space is low-dimensional.
+
+
+## Current Project Implementation
+
+For the current Osteosarcoma/Habitats project implementation, also read `references/project_fusion_implementation.md` before editing `/host/d/Github/Osteosarcoma/fusion` or fusion final-selection notebooks.
