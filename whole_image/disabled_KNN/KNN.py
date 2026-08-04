@@ -28,7 +28,7 @@ TASK_TO_LABEL_COL = {
     "Pathologic": "Pathologic_label",
 }
 N_SPLITS = 5
-TRAIN_FOLDS = [0, 1, 2, 3,4]
+TRAIN_FOLDS = [0, 1, 2, 3, 4]
 INTERNAL_TEST_FOLD = 5
 EXTERNAL_TEST_FOLD = 6
 LABEL_COL = TASK_TO_LABEL_COL[DEFAULT_TASK]
@@ -43,17 +43,18 @@ SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
     "image_label_info_set123_5fold_{task_lower}_random{random_state}.xlsx"
 )
-DEFAULT_PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/habitats_individual/habitat_radiomics_measurements_avg_PCC.xlsx"
-RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/habitats"
+PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/whole_image/radiomics_measurements_PCC.xlsx"
+RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image"
+SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image/select"
 MODEL_ROOT = "/host/d/projects/Habitats/models"
-DEFAULT_IMAGE_TYPE = "habitats_individual"
+IMAGE_TYPE = "whole_image"
 CLASSIFIER_ARG = "KNN"
 CLASSIFIER_NAME = "KNN"
 CLASSIFIER_DIR = "KNN"
 MODEL_LABEL = "KNN"
 SELECTOR_ARG = "knn_feature_selector"
-DEFAULT_SELECTOR = "sfs"
-SELECTED_PREFIX = "habitat_radiomics_measurements"
+DEFAULT_SELECTOR = "lasso"
+SELECTED_PREFIX = "radiomics_measurements"
 METRIC_KEYS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 FEATURE_SELECTION_SCOPE = "all_set123_train_internal_external"
 
@@ -84,14 +85,12 @@ def top_k_label(top_k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run habitat radiomics experiments.")
+    parser = argparse.ArgumentParser(description="Run whole-image radiomics KNN experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
-    parser.add_argument("--pcc_radiomics_path", default=DEFAULT_PCC_RADIOMICS_PATH)
-    parser.add_argument("--image_type", choices=["habitats_individual", "habitats_avg", "habitats_sum"], default=DEFAULT_IMAGE_TYPE)
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--gridsearch_range", choices=["train", "all"], default="train", help="Use train data or all data for hyperparameter GridSearchCV.")
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
-    parser.add_argument("--knn_feature_selector", choices=['sfs', 'lasso'], default=DEFAULT_SELECTOR)
+    parser.add_argument("--knn_feature_selector", choices=['lasso'], default=DEFAULT_SELECTOR)
     parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Use None to keep all non-zero LASSO features.")
     return parser.parse_args()
 
@@ -100,18 +99,8 @@ def get_label_col(task):
     return TASK_TO_LABEL_COL[task]
 
 
-def get_model_out_dir(task, image_type):
-    return os.path.join(MODEL_ROOT, task, image_type)
-
-
-def get_select_out_dir(image_type):
-    if image_type == "habitats_individual":
-        return "/host/d/projects/Habitats/radiomics/habitats_individual/select"
-    if image_type == "habitats_avg":
-        return "/host/d/projects/Habitats/radiomics/habitats/select_avg"
-    if image_type == "habitats_sum":
-        return "/host/d/projects/Habitats/radiomics/habitats/select_sum"
-    raise ValueError(f"Unsupported image_type for select dir: {image_type}")
+def get_model_out_dir(task):
+    return os.path.join(MODEL_ROOT, task, IMAGE_TYPE)
 
 
 
@@ -260,8 +249,6 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
     estimator = selection_estimator(random_state, y)
     if feature_selector == "rfe":
         selector = RFE(estimator=estimator, n_features_to_select=top_k, step=1, importance_getter=importance_getter_for_selector())
-    elif feature_selector == "sfs":
-        selector = SequentialFeatureSelector(estimator=estimator, n_features_to_select=top_k, direction="forward", scoring="roc_auc", cv=cv, n_jobs=1)
     elif feature_selector == "rfecv":
         selector = RFECV(estimator=estimator, step=1, cv=cv, scoring="roc_auc", n_jobs=1, importance_getter=importance_getter_for_selector())
     else:
@@ -273,31 +260,30 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
     return selected_features
 
 
-def get_selected_feature_path(task, random_state, feature_selector, top_k, image_type):
+def get_selected_feature_path(task, random_state, feature_selector, top_k):
     suffix = f"{task}_random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         suffix += f"_top{top_k}"
     elif feature_selector == "lasso":
         suffix += f"_{top_k_label(top_k)}"
-    select_dir = get_select_out_dir(image_type)
-    os.makedirs(select_dir, exist_ok=True)
     selector_file_classifier = "LR" if feature_selector == "lasso" else CLASSIFIER_ARG
-    return os.path.join(select_dir, f"{SELECTED_PREFIX}_{selector_file_classifier}_{suffix}_selected.xlsx")
+    return os.path.join(SELECT_OUT_DIR, f"{SELECTED_PREFIX}_{selector_file_classifier}_{suffix}_selected.xlsx")
 
 
 def get_feature_cols_from_selected_table(selected_df):
     return [c for c in selected_df.columns if c not in NON_FEATURE_COLS]
 
 
-def save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k, image_type):
-    selected_out_path = get_selected_feature_path(task, random_state, feature_selector, top_k, image_type)
+def save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k):
+    os.makedirs(SELECT_OUT_DIR, exist_ok=True)
+    selected_out_path = get_selected_feature_path(task, random_state, feature_selector, top_k)
     radiomics_df[NON_FEATURE_COLS + selected_features].copy().to_excel(selected_out_path, index=False)
     print("Saved selected feature table:", selected_out_path)
     return selected_out_path
 
 
-def load_or_select_features(radiomics_df, feature_selector, top_k, feature_cols, X_all, y_all, task, random_state, image_type):
-    selected_path = get_selected_feature_path(task, random_state, feature_selector, top_k, image_type)
+def load_or_select_features(radiomics_df, feature_selector, top_k, feature_cols, X_all, y_all, task, random_state):
+    selected_path = get_selected_feature_path(task, random_state, feature_selector, top_k)
     if os.path.exists(selected_path):
         selected_df = pd.read_excel(selected_path)
         selected_features = get_feature_cols_from_selected_table(selected_df)
@@ -307,7 +293,9 @@ def load_or_select_features(radiomics_df, feature_selector, top_k, feature_cols,
             return selected_path, selected_features
         print("Existing selected feature table has no feature columns; regenerating:", selected_path)
     selected_features = select_features(feature_selector, top_k, feature_cols, X_all, y_all, random_state)
-    selected_path = save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k, image_type)
+    if not selected_features:
+        raise SkipExperiment(f"{feature_selector} selected 0 features.")
+    selected_path = save_selected_features(radiomics_df, selected_features, task, random_state, feature_selector, top_k)
     return selected_path, selected_features
 
 
@@ -431,7 +419,7 @@ def get_experiment_name(random_state, feature_selector, top_k):
     if feature_selector == "lasso":
         return f"random{random_state}_{feature_selector}_{top_k_label(top_k)}"
     experiment_name = f"random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         experiment_name += f"_top{top_k}"
     return experiment_name
 
@@ -675,7 +663,7 @@ def run_train_experiment(out_dir, merged_df, X_selected, y, train_idx_all, rando
 
 
 def run_train_only_for_completed_experiment(args, labels_df, split_path, out_dir):
-    _, merged_df, feature_cols, X, y, folds = load_features_and_labels(args.pcc_radiomics_path, labels_df)
+    _, merged_df, feature_cols, X, y, folds = load_features_and_labels(PCC_RADIOMICS_PATH, labels_df)
 
     train_mask = merged_df[SPLIT_COL].eq("train") & merged_df[FOLD_COL].isin(TRAIN_FOLDS)
     internal_test_mask = merged_df[SPLIT_COL].eq("internal test") & merged_df[FOLD_COL].eq(INTERNAL_TEST_FOLD)
@@ -727,9 +715,9 @@ def run_train_only_for_completed_experiment(args, labels_df, split_path, out_dir
 
 def run_experiment(args, labels_df, split_path):
     feature_selector = getattr(args, SELECTOR_ARG)
-    radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(args.pcc_radiomics_path, labels_df)
+    radiomics_df, merged_df, feature_cols, X, y, folds = load_features_and_labels(PCC_RADIOMICS_PATH, labels_df)
     experiment_name = get_experiment_name(args.random_state, feature_selector, args.top_k)
-    out_dir = os.path.join(get_model_out_dir(args.task, args.image_type), CLASSIFIER_DIR, experiment_name)
+    out_dir = os.path.join(get_model_out_dir(args.task), CLASSIFIER_DIR, experiment_name)
     os.makedirs(out_dir, exist_ok=True)
     if completed_experiment_exists(out_dir):
         if train_experiment_exists(out_dir):
@@ -763,7 +751,6 @@ def run_experiment(args, labels_df, split_path):
             y_all=y,
             task=args.task,
             random_state=args.random_state,
-            image_type=args.image_type,
         )
     except SkipExperiment as exc:
         write_skip_file(out_dir, args, feature_selector, exc.reason)

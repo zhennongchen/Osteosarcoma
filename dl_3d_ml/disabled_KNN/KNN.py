@@ -32,7 +32,7 @@ TRAIN_FOLDS = [0, 1, 2, 3, 4]
 INTERNAL_TEST_FOLD = 5
 EXTERNAL_TEST_FOLD = 6
 LABEL_COL = TASK_TO_LABEL_COL[DEFAULT_TASK]
-NON_FEATURE_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath"]
+NON_FEATURE_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath", "fold", "Label"]
 ID_COLS = ["Patient_set", "Patient_index", "Image_filepath", "Mask_filepath"]
 RFECV_MAX_FEATURES = 35
 LASSO_MAX_FEATURES = 35
@@ -43,18 +43,19 @@ SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
     "image_label_info_set123_5fold_{task_lower}_random{random_state}.xlsx"
 )
-PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/whole_image/radiomics_measurements_PCC.xlsx"
-RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image"
-SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/whole_image/select"
+PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/dl_3d_ml/dl_3d_features_PCA.xlsx"
+RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_3d_ml"
+SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_3d_ml/select"
 MODEL_ROOT = "/host/d/projects/Habitats/models"
-IMAGE_TYPE = "whole_image"
+IMAGE_TYPE = "dl_3d_ml"
+DEFAULT_TRIAL_NAME = "dl_3d_ml"
 CLASSIFIER_ARG = "KNN"
 CLASSIFIER_NAME = "KNN"
 CLASSIFIER_DIR = "KNN"
 MODEL_LABEL = "KNN"
 SELECTOR_ARG = "knn_feature_selector"
-DEFAULT_SELECTOR = "sfs"
-SELECTED_PREFIX = "radiomics_measurements"
+DEFAULT_SELECTOR = "lasso"
+SELECTED_PREFIX = "dl_3d_features"
 METRIC_KEYS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 FEATURE_SELECTION_SCOPE = "all_set123_train_internal_external"
 
@@ -85,18 +86,27 @@ def top_k_label(top_k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run whole-image radiomics KNN experiments.")
+    parser = argparse.ArgumentParser(description="Run DL 3D feature KNN experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
+    parser.add_argument("--trial_name", default=DEFAULT_TRIAL_NAME, help="Radiomics/model trial folder name, e.g. dl_2d_ml, dl_2d_ml_cv, or dl_3d_ml.")
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--gridsearch_range", choices=["train", "all"], default="train", help="Use train data or all data for hyperparameter GridSearchCV.")
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
-    parser.add_argument("--knn_feature_selector", choices=['sfs', 'lasso'], default=DEFAULT_SELECTOR)
+    parser.add_argument("--knn_feature_selector", choices=['lasso'], default=DEFAULT_SELECTOR)
     parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Use None to keep all non-zero LASSO features.")
     return parser.parse_args()
 
 
 def get_label_col(task):
     return TASK_TO_LABEL_COL[task]
+
+
+def configure_trial_paths(trial_name):
+    global PCC_RADIOMICS_PATH, RADIOMICS_OUT_DIR, SELECT_OUT_DIR, IMAGE_TYPE
+    IMAGE_TYPE = str(trial_name)
+    RADIOMICS_OUT_DIR = os.path.join("/host/d/projects/Habitats/radiomics", IMAGE_TYPE)
+    PCC_RADIOMICS_PATH = os.path.join(RADIOMICS_OUT_DIR, f"{SELECTED_PREFIX}_PCA.xlsx")
+    SELECT_OUT_DIR = os.path.join(RADIOMICS_OUT_DIR, "select")
 
 
 def get_model_out_dir(task):
@@ -146,12 +156,26 @@ def load_features_and_labels(radiomics_path, labels_df):
         raise ValueError(f"Missing columns in label table: {missing_label_cols}")
     missing_radiomics_cols = [c for c in ["Patient_set", "Patient_index"] if c not in radiomics_df.columns]
     if missing_radiomics_cols:
-        raise ValueError(f"Missing columns in radiomics table: {missing_radiomics_cols}")
+        raise ValueError(f"Missing columns in DL feature table: {missing_radiomics_cols}")
     label_cols = ["Patient_set", "Patient_index", SPLIT_COL, FOLD_COL, LABEL_COL]
-    merged_df = radiomics_df.merge(labels_df[label_cols], on=["Patient_set", "Patient_index"], how="inner", validate="one_to_one").reset_index(drop=True)
-    if len(merged_df) != len(radiomics_df) or len(merged_df) != len(labels_df):
-        raise ValueError(f"Radiomics and labels are not a complete one-to-one match: radiomics={len(radiomics_df)}, labels={len(labels_df)}, merged={len(merged_df)}")
+
+    # DL feature tables may keep inspection metadata such as fold/Label.
+    # Drop those before merge; the authoritative split/fold/label always comes from labels_df.
     feature_cols = [c for c in radiomics_df.columns if c not in NON_FEATURE_COLS]
+    id_cols_existing = [c for c in ID_COLS if c in radiomics_df.columns]
+    radiomics_for_merge = radiomics_df[id_cols_existing + feature_cols].copy()
+
+    merged_df = radiomics_for_merge.merge(
+        labels_df[label_cols],
+        on=["Patient_set", "Patient_index"],
+        how="inner",
+        validate="one_to_one",
+    ).reset_index(drop=True)
+    if len(merged_df) != len(radiomics_df) or len(merged_df) != len(labels_df):
+        raise ValueError(
+            f"DL features and labels are not a complete one-to-one match: "
+            f"features={len(radiomics_df)}, labels={len(labels_df)}, merged={len(merged_df)}"
+        )
     X = merged_df[feature_cols].values
     y = merged_df[LABEL_COL].astype(int).values
     folds = merged_df[FOLD_COL].astype(int).values
@@ -249,8 +273,6 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
     estimator = selection_estimator(random_state, y)
     if feature_selector == "rfe":
         selector = RFE(estimator=estimator, n_features_to_select=top_k, step=1, importance_getter=importance_getter_for_selector())
-    elif feature_selector == "sfs":
-        selector = SequentialFeatureSelector(estimator=estimator, n_features_to_select=top_k, direction="forward", scoring="roc_auc", cv=cv, n_jobs=1)
     elif feature_selector == "rfecv":
         selector = RFECV(estimator=estimator, step=1, cv=cv, scoring="roc_auc", n_jobs=1, importance_getter=importance_getter_for_selector())
     else:
@@ -264,7 +286,7 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
 
 def get_selected_feature_path(task, random_state, feature_selector, top_k):
     suffix = f"{task}_random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         suffix += f"_top{top_k}"
     elif feature_selector == "lasso":
         suffix += f"_{top_k_label(top_k)}"
@@ -421,14 +443,14 @@ def get_experiment_name(random_state, feature_selector, top_k):
     if feature_selector == "lasso":
         return f"random{random_state}_{feature_selector}_{top_k_label(top_k)}"
     experiment_name = f"random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         experiment_name += f"_top{top_k}"
     return experiment_name
 
 
 def write_skip_file(out_dir, args, feature_selector, reason):
     os.makedirs(out_dir, exist_ok=True)
-    skip_info = {"classifier": CLASSIFIER_NAME, "task": args.task, "label_col": LABEL_COL, "random_state": args.random_state, "feature_selector": feature_selector, "top_k": None if feature_selector == "rfecv" else args.top_k, "status": "skipped", "reason": reason}
+    skip_info = {"classifier": CLASSIFIER_NAME, "task": args.task, "label_col": LABEL_COL, "trial_name": args.trial_name, "random_state": args.random_state, "feature_selector": feature_selector, "top_k": None if feature_selector == "rfecv" else args.top_k, "status": "skipped", "reason": reason}
     skip_path = os.path.join(out_dir, "SKIPPED.json")
     with open(skip_path, "w") as f:
         json.dump(skip_info, f, indent=4)
@@ -787,6 +809,7 @@ def run_experiment(args, labels_df, split_path):
     best_info = {
         "classifier": CLASSIFIER_NAME,
         "task": args.task,
+        "trial_name": args.trial_name,
         "label_col": LABEL_COL,
         "feature_selector": feature_selector,
         "top_k": None if feature_selector == "rfecv" else args.top_k,
@@ -1019,6 +1042,9 @@ def run_experiment(args, labels_df, split_path):
 def main():
     global LABEL_COL
     args = parse_args()
+    configure_trial_paths(args.trial_name)
+    print("Trial name:", args.trial_name)
+    print("PCC feature path:", PCC_RADIOMICS_PATH)
     LABEL_COL = get_label_col(args.task)
     labels_df, split_path = load_patient_split(random_state=args.random_state, task=args.task)
     if args.classifier is None:

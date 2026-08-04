@@ -20,7 +20,7 @@ FOLD_LIST="0123456"  # examples: 01234 or 012345
 VAL_FOLD_LIST=("56" )  # for cross-validation, the fold to use as validation; must match FOLD_LIST
 
 TRAIN_BATCH_SIZE=20
-TRAIN_NUM_STEPS=100
+TRAIN_NUM_STEPS=30
 SAVE_MODELS_EVERY=2
 
 for RANDOM_STATE in ${RANDOM_STATE_LIST}; do

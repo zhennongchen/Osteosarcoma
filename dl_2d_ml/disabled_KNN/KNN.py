@@ -43,19 +43,19 @@ SPLIT_OUT_PATH_TEMPLATE = (
     "/host/e/D/Data/Habitats/Jishuitan/Patient_lists/"
     "image_label_info_set123_5fold_{task_lower}_random{random_state}.xlsx"
 )
-PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/dl_3d_ml/dl_3d_features_PCA.xlsx"
-RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_3d_ml"
-SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_3d_ml/select"
+PCC_RADIOMICS_PATH = "/host/d/projects/Habitats/radiomics/dl_2d_ml/dl_2d_features_PCA.xlsx"
+RADIOMICS_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_2d_ml"
+SELECT_OUT_DIR = "/host/d/projects/Habitats/radiomics/dl_2d_ml/select"
 MODEL_ROOT = "/host/d/projects/Habitats/models"
-IMAGE_TYPE = "dl_3d_ml"
-DEFAULT_TRIAL_NAME = "dl_3d_ml"
+IMAGE_TYPE = "dl_2d_ml"
+DEFAULT_TRIAL_NAME = "dl_2d_ml_cv"
 CLASSIFIER_ARG = "KNN"
 CLASSIFIER_NAME = "KNN"
 CLASSIFIER_DIR = "KNN"
 MODEL_LABEL = "KNN"
 SELECTOR_ARG = "knn_feature_selector"
-DEFAULT_SELECTOR = "sfs"
-SELECTED_PREFIX = "dl_3d_features"
+DEFAULT_SELECTOR = "lasso"
+SELECTED_PREFIX = "dl_2d_features"
 METRIC_KEYS = ["auc", "auc_ci_low", "auc_ci_high", "accuracy", "sensitivity", "specificity"]
 FEATURE_SELECTION_SCOPE = "all_set123_train_internal_external"
 
@@ -86,13 +86,13 @@ def top_k_label(top_k):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run DL 3D feature KNN experiments.")
+    parser = argparse.ArgumentParser(description="Run DL 2D feature KNN experiments.")
     parser.add_argument("--task", choices=sorted(TASK_TO_LABEL_COL), default=DEFAULT_TASK)
     parser.add_argument("--trial_name", default=DEFAULT_TRIAL_NAME, help="Radiomics/model trial folder name, e.g. dl_2d_ml, dl_2d_ml_cv, or dl_3d_ml.")
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--gridsearch_range", choices=["train", "all"], default="train", help="Use train data or all data for hyperparameter GridSearchCV.")
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
-    parser.add_argument("--knn_feature_selector", choices=['sfs', 'lasso'], default=DEFAULT_SELECTOR)
+    parser.add_argument("--knn_feature_selector", choices=['lasso'], default=DEFAULT_SELECTOR)
     parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Use None to keep all non-zero LASSO features.")
     return parser.parse_args()
 
@@ -273,8 +273,6 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
     estimator = selection_estimator(random_state, y)
     if feature_selector == "rfe":
         selector = RFE(estimator=estimator, n_features_to_select=top_k, step=1, importance_getter=importance_getter_for_selector())
-    elif feature_selector == "sfs":
-        selector = SequentialFeatureSelector(estimator=estimator, n_features_to_select=top_k, direction="forward", scoring="roc_auc", cv=cv, n_jobs=1)
     elif feature_selector == "rfecv":
         selector = RFECV(estimator=estimator, step=1, cv=cv, scoring="roc_auc", n_jobs=1, importance_getter=importance_getter_for_selector())
     else:
@@ -288,7 +286,7 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
 
 def get_selected_feature_path(task, random_state, feature_selector, top_k):
     suffix = f"{task}_random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         suffix += f"_top{top_k}"
     elif feature_selector == "lasso":
         suffix += f"_{top_k_label(top_k)}"
@@ -445,7 +443,7 @@ def get_experiment_name(random_state, feature_selector, top_k):
     if feature_selector == "lasso":
         return f"random{random_state}_{feature_selector}_{top_k_label(top_k)}"
     experiment_name = f"random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         experiment_name += f"_top{top_k}"
     return experiment_name
 

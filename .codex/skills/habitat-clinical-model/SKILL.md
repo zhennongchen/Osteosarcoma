@@ -15,7 +15,19 @@ Related skills:
 
 ## Current Decision
 
-The current project labels are binary labels such as `Prognosis_label` and `Pathologic_label`. We do not currently have recurrence/progression time plus censoring columns, so do not use Cox regression for the first clinical model branch.
+The current project labels are binary labels such as `Prognosis_label` and `Pathologic_label`. For the prognosis task, the current working definition has been updated to a 2-year DFS event label as recorded below. We do not currently use Cox regression for the first clinical model branch.
+
+## Current Prognosis Label Definition - Updated 2026-08-04
+
+For the next redo of the prognosis task, define the outcome as:
+
+- `label = 1`: 2-year disease-free survival (DFS) event.
+- Exclude patients whose available follow-up is shorter than 1 year 9 months if they have no observed event.
+- If `Follow_up_time` is earlier than `Admission_time`, treat this as a likely date-ordering error and swap the two dates before calculating follow-up duration.
+- The analysis cohort should be restricted to patients with corresponding image data.
+- Under this rule, an original 3-year event occurring after 2 years should be treated as 2-year `label = 0`, because the patient was event-free at the 2-year horizon.
+
+The decision was made because some patients labeled as 3-year negative did not have sufficient follow-up to confirm 3-year event-free status. A 2-year DFS endpoint with exclusion of follow-up shorter than 1 year 9 months is the current accepted binary-label strategy.
 
 Use binary classification clinical modeling instead:
 
@@ -100,3 +112,70 @@ Baseline tables should use paper-style rows: one parent row `Tumor location` wit
 
 The grouping helper must be idempotent: rerunning it on an already grouped value `Tibia and fibula` must keep it as `Tibia and fibula`, not collapse it into `Others`.
 
+## Strict 2-Year DFS Redo Status - Updated 2026-08-04
+
+The strict 2-year DFS prognosis label update has been applied to patient-list Excel files. Use this state for the next experiment redo unless the user explicitly changes it.
+
+Applied label/case rules:
+
+- `Prognosis_label = 1`: DFS event occurred within 24 months after admission/imaging.
+- Original 3-year positive cases with event time greater than 24 months were recoded to `0`.
+- No-event cases with follow-up shorter than 21 months were excluded.
+- If `Follow_up_time < Admission_time`, the two dates were swapped before calculating follow-up duration.
+- Analysis tables are restricted to cases with corresponding image data.
+
+Updated files:
+
+- `label_info_set1.xlsx`, `label_info_set2.xlsx`, `label_info_set3.xlsx`
+- `label_info_set1+2_原始.xlsx`, `label_info_set3_原始.xlsx`
+- `image_label_info_set123.xlsx`, `image_label_unmatched_set123.xlsx`
+- `image_label_info_set123_resampled_bbox_1x1x3.xlsx`
+- `image_label_info_set123_clinical_variables.xlsx`
+- `image_label_info_set123_clinical_variables_processed.xlsx`
+- `largest_slice_info_set123.xlsx`
+
+Excluded cases due to insufficient no-event follow-up:
+
+- `set_3/26`
+- `set_3/27`
+- `set_3/28`
+
+Cases recoded from original `Prognosis_label=1` to strict 2-year `Prognosis_label=0`:
+
+- `set_1/34`, `set_1/111`, `set_1/119`, `set_1/131`, `set_1/132`, `set_1/136`, `set_1/139`
+- `set_2/10`, `set_2/20`, `set_2/43`, `set_2/44`, `set_2/61`, `set_2/105`, `set_2/120`, `set_2/126`
+
+Current matched cohort after update:
+
+- `set_1`: 99 cases, 20 positives (20.20%)
+- `set_2`: 231 cases, 63 positives (27.27%)
+- `set_3`: 18 cases, 7 positives (38.89%)
+- total: 348 cases, 90 positives (25.86%)
+
+Current generated split files:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random{0,10,20,30,40}.xlsx
+```
+
+Split settings:
+
+- set1+2 split into `n_train=188`, `n_internal_test=96`, `n_external_from_set12=46`
+- all set3 cases are external test: `expected_set3_n=18`
+- CV uses fold 0-4, internal test is fold 5, external test is fold 6
+- fixed train/internal/external split seed selected by search: `107`
+- fold random states: `[0, 10, 20, 30, 40]`
+
+Final split counts:
+
+- train: 188 cases, 47 positives (25.00%)
+- internal test: 96 cases, 24 positives (25.00%)
+- external test: 64 cases, 19 positives (29.69%)
+
+External test composition:
+
+- set1: 10 cases, 2 positives (20.00%)
+- set2: 36 cases, 10 positives (27.78%)
+- set3: 18 cases, 7 positives (38.89%)
+
+The external-test positive fraction is higher mainly because all set3 cases are assigned to external test and set3 has a higher positive fraction.

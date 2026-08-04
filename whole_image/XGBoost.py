@@ -14,7 +14,6 @@ from sklearn.feature_selection import RFE, RFECV, SequentialFeatureSelector
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -90,7 +89,7 @@ def parse_args():
     parser.add_argument("--random_state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--gridsearch_range", choices=["train", "all"], default="train", help="Use train data or all data for hyperparameter GridSearchCV.")
     parser.add_argument("--classifier", choices=[CLASSIFIER_ARG], default=CLASSIFIER_ARG)
-    parser.add_argument("--xgb_feature_selector", choices=['rfe', 'sfs', 'rfecv', 'lasso'], default=DEFAULT_SELECTOR)
+    parser.add_argument("--xgb_feature_selector", choices=['rfe', 'rfecv', 'lasso'], default=DEFAULT_SELECTOR)
     parser.add_argument("--top_k", type=parse_top_k, default=20, help="Number of selected features. Use None to keep all non-zero LASSO features.")
     return parser.parse_args()
 
@@ -173,8 +172,6 @@ def make_estimator(random_state, y_for_weight=None, **params):
         return Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(class_weight="balanced", solver="liblinear", max_iter=5000, random_state=random_state, **params))])
     if CLASSIFIER_ARG == "RF":
         return RandomForestClassifier(class_weight="balanced", random_state=random_state, n_jobs=1, **params)
-    if CLASSIFIER_ARG == "KNN":
-        return Pipeline([("scaler", StandardScaler()), ("clf", KNeighborsClassifier(**params))])
     if CLASSIFIER_ARG == "XGBoost":
         spw = scale_pos_weight_from_y(y_for_weight) if y_for_weight is not None else 1.0
         return XGBClassifier(objective="binary:logistic", eval_metric="auc", tree_method="hist", random_state=random_state, n_jobs=1, scale_pos_weight=spw, **params)
@@ -188,8 +185,6 @@ def get_param_grid():
         return {"clf__C": [0.001, 0.01, 0.1, 1, 10, 100], "clf__tol": [1e-4, 1e-3]}
     if CLASSIFIER_ARG == "RF":
         return {"n_estimators": [100, 300, 500], "max_depth": [None, 3, 5], "max_features": ["sqrt", "log2"]}
-    if CLASSIFIER_ARG == "KNN":
-        return {"clf__n_neighbors": [3, 5, 7, 9, 11], "clf__weights": ["uniform", "distance"]}
     if CLASSIFIER_ARG == "XGBoost":
         return {"n_estimators": [50, 100, 200], "max_depth": [3, 4, 5], "learning_rate": [0.03, 0.1]}
     raise ValueError(f"Unsupported classifier: {CLASSIFIER_ARG}")
@@ -202,8 +197,6 @@ def selection_estimator(random_state, y):
         return make_estimator(random_state=random_state, C=1.0, tol=1e-3)
     if CLASSIFIER_ARG == "RF":
         return make_estimator(random_state=random_state, n_estimators=300, max_depth=5, max_features="sqrt")
-    if CLASSIFIER_ARG == "KNN":
-        return make_estimator(random_state=random_state, n_neighbors=5, weights="uniform")
     if CLASSIFIER_ARG == "XGBoost":
         return make_estimator(random_state=random_state, y_for_weight=y, n_estimators=100, max_depth=5, learning_rate=0.1)
     raise ValueError(f"Unsupported classifier: {CLASSIFIER_ARG}")
@@ -249,8 +242,6 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
     estimator = selection_estimator(random_state, y)
     if feature_selector == "rfe":
         selector = RFE(estimator=estimator, n_features_to_select=top_k, step=1, importance_getter=importance_getter_for_selector())
-    elif feature_selector == "sfs":
-        selector = SequentialFeatureSelector(estimator=estimator, n_features_to_select=top_k, direction="forward", scoring="roc_auc", cv=cv, n_jobs=1)
     elif feature_selector == "rfecv":
         selector = RFECV(estimator=estimator, step=1, cv=cv, scoring="roc_auc", n_jobs=1, importance_getter=importance_getter_for_selector())
     else:
@@ -264,7 +255,7 @@ def select_features(feature_selector, top_k, feature_cols, X, y, random_state):
 
 def get_selected_feature_path(task, random_state, feature_selector, top_k):
     suffix = f"{task}_random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         suffix += f"_top{top_k}"
     elif feature_selector == "lasso":
         suffix += f"_{top_k_label(top_k)}"
@@ -421,7 +412,7 @@ def get_experiment_name(random_state, feature_selector, top_k):
     if feature_selector == "lasso":
         return f"random{random_state}_{feature_selector}_{top_k_label(top_k)}"
     experiment_name = f"random{random_state}_{feature_selector}"
-    if feature_selector in {"rfe", "sfs"}:
+    if feature_selector in {"rfe"}:
         experiment_name += f"_top{top_k}"
     return experiment_name
 

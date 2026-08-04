@@ -524,3 +524,149 @@ Baseline tables should use paper-style rows: one parent row `Tumor location` wit
 
 The grouping helper must be idempotent: rerunning it on an already grouped value `Tibia and fibula` must keep it as `Tibia and fibula`, not collapse it into `Others`.
 
+## Current Prognosis Label Definition - 2026-08-04
+
+The current accepted prognosis endpoint for the next redo is a 2-year disease-free survival (DFS) event label rather than the previous 3-year prognosis label.
+
+Rules:
+
+- `label = 1` means a DFS event occurred within 2 years after admission/imaging.
+- Patients without an observed event must have at least 1 year 9 months of follow-up to be retained as 2-year negative cases. Patients with shorter no-event follow-up should be excluded.
+- If `Follow_up_time` is earlier than `Admission_time`, swap the two dates before calculating follow-up duration, because this is treated as a likely date-ordering error.
+- Restrict the analysis cohort to patients with corresponding image data.
+- Original 3-year positive cases with event time greater than 2 years are recoded to 2-year `label = 0`, because they were event-free at the 2-year horizon.
+
+Rationale:
+
+Some patients labeled as 3-year negative do not have enough follow-up to truly confirm 3-year event-free status. Using a 2-year DFS event endpoint and excluding no-event follow-up shorter than 1 year 9 months reduces this label-noise problem while preserving more usable cases.
+
+Counts calculated from `image_label_info_set123.xlsx` with existing image files:
+
+| Scenario | Dataset | Original N with image | Kept N | Excluded N | Label=1 N | Label=1 percent |
+|---|---:|---:|---:|---:|---:|---:|
+| 3-year label, exclude no-event follow-up < 2y9m | set1+2 | 330 | 216 | 114 | 98 | 45.37% |
+| 3-year label, exclude no-event follow-up < 2y9m | set3 | 21 | 10 | 11 | 7 | 70.00% |
+| 2-year label, exclude no-event follow-up < 1y9m | set1+2 | 330 | 330 | 0 | 83 | 25.15% |
+| 2-year label, exclude no-event follow-up < 1y9m | set3 | 21 | 18 | 3 | 7 | 38.89% |
+
+Two cases had follow-up dates earlier than admission dates and were handled by swapping the dates: `set_2/125` and `set_2/196`.
+
+## Strict 2-Year DFS Redo Applied - 2026-08-04
+
+This section records the completed patient-list and split update for the strict 2-year DFS prognosis redo.
+
+### Label Definition
+
+Use strict 2-year DFS event status for `Prognosis_label`:
+
+- positive (`1`): event within 24 months after admission/imaging
+- negative (`0`): event-free at 24 months
+- exclude no-event cases with follow-up shorter than 21 months
+- if `Follow_up_time` is earlier than `Admission_time`, swap the dates before follow-up calculation
+
+The earlier optional 2-year-3-month relaxation was considered and rejected. Keep strict 2 years.
+
+### Excel Tables Updated
+
+The following files were directly updated after user confirmed backups existed:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/label_info_set1.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/label_info_set2.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/label_info_set3.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/label_info_set1+2_原始.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/label_info_set3_原始.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_unmatched_set123.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_resampled_bbox_1x1x3.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_clinical_variables.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_clinical_variables_processed.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/largest_slice_info_set123.xlsx
+```
+
+`image_info_set123.xlsx` was not regenerated or modified because it is only the image inventory.
+`image_label_info_set123_resampled_bbox_1x1x3.xlsx` and `largest_slice_info_set123.xlsx` were directly row-filtered rather than regenerated.
+
+Excluded cases:
+
+| Patient_set | Patient_index | Reason |
+|---|---:|---|
+| set_3 | 26 | no-event follow-up < 21 months |
+| set_3 | 27 | no-event follow-up < 21 months |
+| set_3 | 28 | no-event follow-up < 21 months |
+
+Recoded from original 3-year event positive to strict 2-year negative because event time was >24 months:
+
+| Patient_set | Patient_index |
+|---|---:|
+| set_1 | 34 |
+| set_1 | 111 |
+| set_1 | 119 |
+| set_1 | 131 |
+| set_1 | 132 |
+| set_1 | 136 |
+| set_1 | 139 |
+| set_2 | 10 |
+| set_2 | 20 |
+| set_2 | 43 |
+| set_2 | 44 |
+| set_2 | 61 |
+| set_2 | 105 |
+| set_2 | 120 |
+| set_2 | 126 |
+
+Current matched cohort after strict 2-year label update:
+
+| Dataset | n | label=1 | label=1 percent |
+|---|---:|---:|---:|
+| set_1 | 99 | 20 | 20.20% |
+| set_2 | 231 | 63 | 27.27% |
+| set_3 | 18 | 7 | 38.89% |
+| total | 348 | 90 | 25.86% |
+
+### Current Patient Split
+
+Generated by `/host/d/Github/Osteosarcoma/patient_split.ipynb` after updating:
+
+```python
+n_train = 188
+n_internal_test = 96
+n_external_from_set12 = 46
+expected_set3_n = 18
+n_splits = 5
+internal_test_fold_value = 5
+external_test_fold_value = 6
+manual_fold_random_state_list = [0, 10, 20, 30, 40]
+```
+
+The fixed train/internal/external split seed selected by tumor-balance search was `107`.
+
+Generated split files:
+
+```text
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random0.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random10.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random20.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random30.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_random40.xlsx
+/host/e/D/Data/Habitats/Jishuitan/Patient_lists/image_label_info_set123_5fold_prognosis_tumor_balance_report.xlsx
+```
+
+Split counts:
+
+| Split | n | label=1 | label=1 percent |
+|---|---:|---:|---:|
+| train | 188 | 47 | 25.00% |
+| internal test | 96 | 24 | 25.00% |
+| external test | 64 | 19 | 29.69% |
+
+External-test composition:
+
+| Patient_set | n | label=1 | label=1 percent |
+|---|---:|---:|---:|
+| set_1 | 10 | 2 | 20.00% |
+| set_2 | 36 | 10 | 27.78% |
+| set_3 | 18 | 7 | 38.89% |
+
+Interpretation: set1+2 was stratified well (`external_from_set12` positive fraction 26.09%), while the final external-test positive fraction is higher because set3 is entirely external and has a higher positive fraction.
+

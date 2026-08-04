@@ -11,7 +11,7 @@ TOP_K_LIST="${TOP_K_LIST:-20 25 30}"
 LASSO_TOP_K_LIST="${LASSO_TOP_K_LIST:-None ${TOP_K_LIST}}"
 
 for RANDOM_STATE in ${RANDOM_STATE_LIST}; do
-  for selector in rfe sfs; do
+  for selector in rfe; do
     for top_k in ${TOP_K_LIST}; do
       echo "========== XGBoost | task=${TASK} | random_state=${RANDOM_STATE} | selector=${selector} | top_k=${top_k} =========="
       python3 "${PYTHON_SCRIPT}" \

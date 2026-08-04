@@ -16,7 +16,7 @@ DEFAULT_TASK = "Prognosis"
 MODEL_ROOT = Path("/host/d/projects/Habitats/models")
 IMAGE_TYPE = "whole_image"
 DEFAULT_OUTPUT_NAME = "whole_image_model_summary.xlsx"
-PREFERRED_CLASSIFIER_ORDER = ["SVM", "LR", "XGBoost", "RandomForest", "KNN"]
+PREFERRED_CLASSIFIER_ORDER = ["SVM", "LR", "XGBoost", "RandomForest"]
 EXPERIMENT_RE = re.compile(
     r"^random(?P<random_state>\d+)_(?P<feature_selector>[^_]+)(?:_(?P<top_label>none|top\d+)|_top(?P<top_k>.+))?$",
     re.IGNORECASE,

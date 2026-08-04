@@ -5,11 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Edit these variables for a run.
 TASK="${TASK:-Prognosis}"
-METHOD_LIST="${METHOD_LIST:-SVM LR RF KNN XGBoost}"
+METHOD_LIST="${METHOD_LIST:-SVM LR RF XGBoost}"
 RANDOM_STATE_LIST="${RANDOM_STATE_LIST:-0 10 20 30 40}"
 GRIDSEARCH_RANGE="${GRIDSEARCH_RANGE:-all}"  # choices: train, all
 TOP_K_LIST="${TOP_K_LIST:-7 10 12 15 17 20 22 25 27 30}"
-HABITAT_MODE="${HABITAT_MODE:-avg}" # choices: individual, avg, sum
+HABITAT_MODE="${HABITAT_MODE:-sum}" # choices: individual, avg, sum
 
 if [[ "${HABITAT_MODE}" == "individual" ]]; then
   PCC_RADIOMICS_PATH="${PCC_RADIOMICS_PATH:-/host/d/projects/Habitats/radiomics/habitats_individual/habitat_radiomics_measurements_avg_PCC.xlsx}"

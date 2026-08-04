@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Edit these variables for a run. 
 TASK="${TASK:-Prognosis}"
 TRIAL_NAME="${TRIAL_NAME:-dl_2d_ml_all}"
-METHOD_LIST="${METHOD_LIST:-SVM LR RF KNN XGBoost}"
+METHOD_LIST="${METHOD_LIST:-SVM LR RF XGBoost}"
 RANDOM_STATE_LIST="${RANDOM_STATE_LIST:-0 10 20 30 40}"
 GRIDSEARCH_RANGE="${GRIDSEARCH_RANGE:-all}"  # choices: train, all
 TOP_K_LIST="${TOP_K_LIST:-7 10 12 15 17 20 22 25 27 30}" 
