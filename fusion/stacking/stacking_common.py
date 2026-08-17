@@ -35,7 +35,7 @@ FUSION_PROBABILITY_PATH = os.path.join(
 FEATURE_COLS = [
     "prob_clinical",
     "prob_whole_image",
-    "prob_habitats_sum",
+    "prob_habitats_avg",
     "prob_dl_3d_ml_all",
 ]
 

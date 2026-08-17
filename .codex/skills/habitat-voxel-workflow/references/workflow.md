@@ -283,6 +283,22 @@ Important naming note:
   - `select_avg/`
   - `select_sum/`
 
+### Current H-Radiomics Branch Selection - 2026-08-06
+
+For the current Prognosis results/final-selection workflow, the selected habitat branch is now:
+
+```text
+H-radiomics = habitats_avg
+```
+
+Use the average habitat representation for current H-radiomics result interpretation:
+
+- radiomics feature table: `/host/d/projects/Habitats/radiomics/habitats/habitat_radiomics_measurements_avg_PCC.xlsx`
+- model output root: `/host/d/projects/Habitats/models/Prognosis/habitats_avg/`
+- final-selection folder: `/host/d/projects/Habitats/models/Prognosis/habitats_avg/final_selections/`
+
+The previously run `habitats_sum` branch remains available as an alternate/older fixed-K branch, but it is no longer the selected H-radiomics branch for the current results. `habitats_individual` still denotes the older per-case-K workflow.
+
 ## Step 3: Back-Project Habitat Masks to Original Image Space
 
 Notebook section: `step 3: put habitat mask into original image space`.
